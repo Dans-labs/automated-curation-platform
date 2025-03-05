@@ -133,15 +133,18 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-pre_startup_routine(app)
 LOG_FILE = settings.LOG_FILE
 log_config = uvicorn.config.LOGGING_CONFIG
+logging.basicConfig(filename=settings.LOG_FILE, level=settings.LOG_LEVEL,
+                        format=settings.LOG_FORMAT)
 
 if settings.otlp_enable is False:
-    logging.basicConfig(filename=settings.LOG_FILE, level=settings.LOG_LEVEL,
-                        format=settings.LOG_FORMAT)
+    logging.info("Logging configured without OTLP")
 else:
+    logging.info("OTLP enabled")
     a_commons.set_otlp(app, APP_NAME, OTLP_GRPC_ENDPOINT, LOG_FILE, log_config)
+
+pre_startup_routine(app)
 
 
 # register routers
@@ -182,5 +185,6 @@ def iterate_saved_bridge_plugin_dir():
 
 if __name__ == "__main__":
     logging.info('START Automated Curation Platform')
-
+    logging.info(f'APP_NAME: {APP_NAME}')
+    logging.info(f'Settings: {settings.to_dict()}')
     uvicorn.run(app, host="0.0.0.0", port=EXPOSE_PORT, log_config=log_config)
