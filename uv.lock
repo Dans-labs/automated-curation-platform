@@ -263,7 +263,7 @@ requires-dist = [
     { name = "simple-file-checksum", specifier = ">=1.3.1" },
     { name = "sqlmodel", specifier = ">=0.0.23" },
     { name = "swh-deposit", specifier = ">=1.3.3" },
-    { name = "sword2", specifier = ">=0.3" },
+    { name = "sword2", git = "https://github.com/ekoi/python-client-sword2" },
 ]
 
 [[package]]
@@ -694,11 +694,14 @@ wheels = [
 
 [[package]]
 name = "httplib2"
-version = "0.18.1"
+version = "0.22.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/98/3f/0769a851fbb0ecc458260055da67d550d3015ebe6b8b861c79ad00147bb9/httplib2-0.18.1.tar.gz", hash = "sha256:8af66c1c52c7ffe1aa5dc4bcd7c769885254b0756e6e69f953c7f0ab49a70ba3", size = 262930 }
+dependencies = [
+    { name = "pyparsing" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3d/ad/2371116b22d616c194aa25ec410c9c6c37f23599dcd590502b74db197584/httplib2-0.22.0.tar.gz", hash = "sha256:d7a10bc5ef5ab08322488bde8c726eeee5c8618723fdb399597ec58f3d82df81", size = 351116 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b3/ad/d9d9331850ea5bd4f5cb8c650c0bfa119a4abd6b0ad7c45b6506bc979fc0/httplib2-0.18.1-py3-none-any.whl", hash = "sha256:ca2914b015b6247791c4866782fa6042f495b94401a0f0bd3e1d6e0ba2236782", size = 95274 },
+    { url = "https://files.pythonhosted.org/packages/a8/6c/d2fbdaaa5959339d53ba38e94c123e4e84b8fbc4b84beb0e70d7c1608486/httplib2-0.22.0-py3-none-any.whl", hash = "sha256:14ae0a53c1ba8f3d37e9e27cf37eabb0fb9980f435ba405d546948b009dd64dc", size = 96854 },
 ]
 
 [[package]]
@@ -1317,6 +1320,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pyparsing"
+version = "3.2.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/8b/1a/3544f4f299a47911c2ab3710f534e52fea62a633c96806995da5d25be4b2/pyparsing-3.2.1.tar.gz", hash = "sha256:61980854fd66de3a90028d679a954d5f2623e83144b5afe5ee86f43d762e5f0a", size = 1067694 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1c/a7/c8a2d361bf89c0d9577c934ebb7421b25dc84bf3a8e3ac0a40aed9acc547/pyparsing-3.2.1-py3-none-any.whl", hash = "sha256:506ff4f4386c4cec0590ec19e6302d3aedb992fdc02c761e90416f158dacf8e1", size = 107716 },
+]
+
+[[package]]
 name = "python-dateutil"
 version = "2.9.0.post0"
 source = { registry = "https://pypi.org/simple" }
@@ -1622,15 +1634,11 @@ wheels = [
 
 [[package]]
 name = "sword2"
-version = "0.3"
-source = { registry = "https://pypi.org/simple" }
+version = "0.2.1"
+source = { git = "https://github.com/ekoi/python-client-sword2#fec62d75761be6b5938a5b9b364f26231d3e886e" }
 dependencies = [
     { name = "httplib2" },
     { name = "lxml" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/1e/2a/98cbe2520f5ba0c1e13c067f2131e8019615f609ac1904ada25ddafd539e/sword2-0.3.tar.gz", hash = "sha256:720f171ff13ff69baef682f753b8636b074469c38441dfaedaa08de1d4f419ec", size = 42028 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3b/f0/a363b19787eb9a4631d7a1941ee677bed188305e4541525c688333f1473b/sword2-0.3-py3-none-any.whl", hash = "sha256:ae8a7165b2c0389cc1aa4ad75a4ca866c232e4506e6a4b7dd50b81082049c89f", size = 47302 },
 ]
 
 [[package]]
