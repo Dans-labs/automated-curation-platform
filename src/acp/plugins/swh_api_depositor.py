@@ -35,12 +35,12 @@ class SwhApiDepositor(Bridge):
         """
         logging.info(f'DEPOSIT to {self.target.repo_name}')
         target_response = TargetResponse()
-        target_swh = jmespath.search("metadata[*].fields[?name=='repository_url'].value",
+        target_swh = jmespath.search("metadata.repository_url.value",#TODO: Move to acp config assistant as a json element
                                      json.loads(self.metadata_rec.md))
         tdm = TargetDataModel(response=target_response)
         headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {settings.SWH_ACCESS_TOKEN}'}
         logging.info(f'self.target.target_url: {self.target.target_url}')
-        swh_url = f'{self.target.target_url}/{target_swh[0][0]}/'
+        swh_url = f'{self.target.target_url}/{target_swh}/'
         logging.info(f'swh_url: {swh_url}')
         api_resp = requests.post(swh_url, data="{}", headers=headers)
         logging.info(f'{api_resp.status_code} {api_resp.text}')
@@ -70,8 +70,7 @@ class SwhApiDepositor(Bridge):
                         logging.info(f"Get request to : {snapshot_url}.")
                         step2_snapshot_resp = requests.get(snapshot_url, headers=headers)
                         if step2_snapshot_resp.status_code != 200:
-                            logging.error(f"snapshot_resp.status_code: {step2_snapshot_resp.status_code}", "error",
-                                   self.app_name)
+                            logging.error(f"snapshot_resp.status_code: {step2_snapshot_resp.status_code}")
                             tdm.deposit_status = DepositStatus.ERROR
                             target_response.status_code = step2_snapshot_resp.status_code
                             target_response.content_type = ResponseContentType.JSON
@@ -96,8 +95,7 @@ class SwhApiDepositor(Bridge):
                             break
 
                         master_branch_resp_json = step3_master_branch_resp.json()
-                        logging.info(f"master_branch_resp_json: {json.dumps(master_branch_resp_json)}", settings.LOG_LEVEL,
-                               self.app_name)
+                        logging.info(f"master_branch_resp_json: {json.dumps(master_branch_resp_json)}")
                         swhid_dir = f'swh:1:dir:{master_branch_resp_json['directory']}'
                         swhid_dir_url = master_branch_resp_json['directory_url']
                         logging.info(f"SWHID_DIR: {swhid_dir} with URL: {swhid_dir_url}")
@@ -119,15 +117,13 @@ class SwhApiDepositor(Bridge):
                     sleep(settings.SWH_DELAY_POLLING)
 
         else:
-            logging.info(f'ERROR api_resp.status_code: {api_resp.status_code}')
+            logging.error(f'ERROR api_resp.status_code: {api_resp.status_code}')
             target_response.status_code = api_resp.status_code
             tdm.deposit_status = DepositStatus.ERROR
             target_response.error = json.dumps(api_resp.json())
             target_response.content_type = ResponseContentType.JSON
-            target_response.status = DepositStatus.ERROR
             target_response.url = swh_url
             target_response.content = json.dumps(api_resp.json())
-            logging.info(f'tdm: {tdm.model_dump(by_alias=True)}', settings.LOG_LEVEL,
-                   self.app_name)
+            logging.error(f'tdm: {tdm.model_dump(by_alias=True)}')
 
         return tdm

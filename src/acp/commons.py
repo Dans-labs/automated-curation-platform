@@ -42,17 +42,17 @@ db_manager = DatabaseManager(db_dialect=settings.DB_DIALECT, db_url=settings.DB_
 
 transformer_headers = {
     'Content-Type': 'application/json',
-    'Authorization': f'Bearer {settings.DANS_TRANSFORMER_SERVICE_API_KEY}'
+    'Authorization': f'Bearer {settings.METADATA_TRANSFORMER_SERVICE_API_KEY}'
 }
 
 transformer_headers_xml = {
     'Content-Type': 'application/xml',
-    'Authorization': f'Bearer {settings.DANS_TRANSFORMER_SERVICE_API_KEY}'
+    'Authorization': f'Bearer {settings.METADATA_TRANSFORMER_SERVICE_API_KEY}'
 }
 
 assistant_repo_headers = {
     'Content-Type': 'application/json',
-    'Authorization': f'Bearer {settings.DANS_REPO_ASSISTANT_SERVICE_API_KEY}'
+    'Authorization': f'Bearer {settings.ACP_CONFIG_ASSISTANT_SERVICE_API_KEY}'
 }
 
 def get_version():
@@ -117,6 +117,7 @@ def get_name():
 
 
 def get_class(kls) -> Any:
+
     """
     This function dynamically imports a class from a plugin.
 
@@ -174,6 +175,10 @@ def transform(transformer_url: str, str_tobe_transformed: str, headers: {} = Non
         return response.json().get('result')
 
     logging.error(f'transformer_response.status_code: {response.status_code}')
+    logging.error(f'transformer_response.text: {response.text}')
+    logging.error(f'transformer_response.headers: {response.headers}')
+    logging.error(f'send header: {headers}')
+    logging.error(f'send body: {str_tobe_transformed}')
     raise ValueError(f"Error - Transformer response status code: {response.status_code}")
 
 def transform_json(transformer_url: str, str_tobe_transformed: str) -> str:

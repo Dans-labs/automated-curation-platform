@@ -74,7 +74,7 @@ async def lifespan(application: FastAPI):
     yield
 
 
-api_keys = [settings.DANS_PACKAGING_SERVICE_API_KEY]
+api_keys = [settings.ACP_SERVICE_API_KEY]
 
 security = HTTPBearer()
 
@@ -126,12 +126,8 @@ def pre_startup_routine(app: FastAPI) -> None:
 
 
 # create FastAPI app instance
-app = FastAPI(
-    title=settings.FASTAPI_TITLE,
-    description=settings.FASTAPI_DESCRIPTION,
-    version= project_details['version'],
-    lifespan=lifespan
-)
+app = FastAPI(title=project_details['title'], description=project_details['description'],
+              version=project_details['version'], lifespan=lifespan)
 
 LOG_FILE = settings.LOG_FILE
 log_config = uvicorn.config.LOGGING_CONFIG

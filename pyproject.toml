@@ -26,5 +26,8 @@ dependencies = [
     "simple-file-checksum>=1.3.1",
     "sqlmodel>=0.0.23",
     "swh-deposit>=1.3.3",
-    "sword2>=0.3",
+    "sword2",
 ]
+
+[tool.uv.sources]
+sword2 = { git = "https://github.com/ekoi/python-client-sword2" }
