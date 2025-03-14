@@ -25,29 +25,35 @@ async def get_plugins_list():
     """
     return sorted(list(data.keys()))
 
+
 @router.get("/progress-state/{owner_id}")
-async def progress_state(owner_id: str, req: Request):
+async def progress_state(owner_id: str, req: Request, page: int = 1, page_size: int = 10):
     """
     Endpoint to retrieve the progress state of assets owned by a specific owner.
 
     Args:
-        req: Request: The incoming request object.
         owner_id (str): The ID of the owner whose assets' progress state is to be retrieved.
+        req (Request): The incoming request object.
+        page (int, optional): The page number for pagination. Defaults to 1.
+        page_size (int, optional): The number of items per page for pagination. Defaults to 10.
 
     Returns:
         list: A list of rows representing the progress state of the owner's assets.
               If no assets are found, an empty list is returned.
     """
+    # Retrieve the 'targets-credentials' header from the request
     tc_header = req.headers.get('targets-credentials')
     if tc_header is None:
         raise HTTPException(status_code=400, detail="Targets credentials are missing")
 
+    # Attempt to parse the 'targets-credentials' header as JSON
     try:
         target_creds = json.loads(tc_header)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid json format of targets-credentials")
 
-    datasets = db_manager.find_datasets_by_owner(owner_id)
+    # Find datasets by owner ID
+    datasets = db_manager.find_datasets_by_owner(owner_id, page, page_size)
     if datasets:
         oam = OwnerAssetsModel()
         oam.owner_id = owner_id
@@ -62,9 +68,13 @@ async def progress_state(owner_id: str, req: Request):
                 '%Y-%m-%d %H:%M:%S') if dataset.submitted_date else ''
             asset.release_version = dataset.release_version.name
             asset.version = dataset.version if dataset.version else ''
+
+            # Find target repositories by dataset ID
             targets_repo = db_manager.find_target_repos_by_dataset_id(str(dataset.id))
             logging.info(f'dataset release version: {dataset.release_version}')
             print(dataset.release_version)
+
+            # Process target repositories if the dataset is not in DRAFT release version
             if dataset.release_version is not ReleaseVersion.DRAFT:
                 for target_repo in targets_repo:
                     target = TargetApp()
@@ -74,13 +84,16 @@ async def progress_state(owner_id: str, req: Request):
                     target.deposit_time = target_repo.deposit_time.strftime(
                         '%Y-%m-%d %H:%M:%S') if target_repo.deposit_time else ''
                     target.duration = str(target_repo.duration)
+
+                    # Parse the target repository output as JSON if available
                     rsp = json.loads(target_repo.target_output) if target_repo.target_output else {}
                     if rsp:
-                        idents =  rsp['response']['identifiers']
+                        idents = rsp['response']['identifiers']
                         target.output_response = {"response": {"identifiers": idents}}
+
+                        # Fetch diff for Dataverse if URL contains "dataset.xhtml"
                         if idents:
                             url = rsp['response']['identifiers'][0]['url']
-                            # Dataverse only. TODO: Think more generic solution
                             if url.find("dataset.xhtml") > 0:
                                 logging.info(f'fetching diff for {target.repo_name}')
                                 target.diff = await fetch_dv_json(rsp, target, target_creds, url)
