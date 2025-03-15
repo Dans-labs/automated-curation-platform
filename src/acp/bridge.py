@@ -5,7 +5,7 @@ import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
-from src.acp.commons import settings, db_manager
+from src.acp.commons import app_settings, db_manager
 from src.acp.dbz import TargetRepo, DepositStatus, DatabaseManager, Dataset, DataFile
 from src.acp.models.assistant_datamodel import Target
 from src.acp.models.bridge_output_model import TargetDataModel
@@ -58,7 +58,7 @@ class Bridge(ABC):
         object.__setattr__(self, 'metadata_rec', self.db_manager.find_dataset(self.dataset_id))
         object.__setattr__(self, 'app_name', self.metadata_rec.app_name)
         object.__setattr__(self, 'data_file_rec', self.db_manager.find_files(self.dataset_id))
-        object.__setattr__(self, 'dataset_dir', os.path.join(settings.DATA_TMP_BASE_DIR,
+        object.__setattr__(self, 'dataset_dir', os.path.join(app_settings.DATA_TMP_BASE_DIR,
                                                              self.app_name, self.dataset_id))
         self.save_state()
 

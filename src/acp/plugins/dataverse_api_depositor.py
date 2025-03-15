@@ -15,7 +15,7 @@ from starlette import status
 
 from src.acp.bridge import Bridge, TargetDataModel
 from src.acp.commons import (
-    settings,
+    app_settings,
     db_manager,
     transform,
     handle_deposit_exceptions, dmz_dataverse_headers, zip_a_zipfile_with_progress, transform_xml,
@@ -102,7 +102,7 @@ class DataverseIngester(Bridge):
         # The metadata will be transformed if name is "dataset-metadata.json" and the transformed metadata is available.
         try:
             str_dv_metadata = self.__transform_metadata_to_dataverse_json(str_updated_metadata,
-                                                                          settings.get("DV_METADATA", "dataset-metadata.json"), self.metadata_rec.md_type)
+                                                                          app_settings.get("DV_METADATA", "dataset-metadata.json"), self.metadata_rec.md_type)
         except ValueError as e:
             tdm.deposited_metadata = str(e)
             tdm.deposit_status = DepositStatus.ERROR
@@ -135,10 +135,10 @@ class DataverseIngester(Bridge):
                         self.__ingest_files(pid, str_updated_metadata)
                     tdm.deposit_status = DepositStatus.FINISH
                     tdm.deposited_metadata = "The dataset and its file is successfully ingested"
-                    logging.info(f'Ingest FILE(s) successfully!')
+                    logging.info('The dataset and its file is successfully ingested"')
                     target_repo.status_code = status.HTTP_200_OK
                     if self.target.initial_release_version == ReleaseVersion.PUBLISHED:
-                        logging.info(f'Publish the dataset')
+                        logging.info('Publish the dataset')
                         target_repo.status_code = self.__publish_dataset(pid)
                         tdm.deposited_metadata = "The dataset and its files successfully published" if target_repo.status_code == status.HTTP_200_OK else "The dataset is unsuccessfully published"
                 except ValueError as e:
@@ -193,7 +193,7 @@ class DataverseIngester(Bridge):
             transformer = [metadata for metadata in self.target.metadata.transformed_metadata if
                            metadata.name == json_data_name]
             if not transformer or len(transformer) != 1:
-                logging.info(f"Error: Transformer not found or more than one transformer")
+                logging.info("Error: Transformer not found or more than one transformer")
                 #Skip transformation
                 return str_updated_metadata_json
                 # raise ValueError(f"Error: Transformer '{json_data_name}' not found or more than one transformer")
@@ -262,7 +262,7 @@ class DataverseIngester(Bridge):
     def __ingest_files(self, pid: str, str_updated_metadata_json: str) -> int:
         logging.info(f'Ingesting files to {pid}')
 
-        str_dv_file = self.__transform_metadata_to_dataverse_json(str_updated_metadata_json, settings.get("DV_FILES", "dataset-files.json"))
+        str_dv_file = self.__transform_metadata_to_dataverse_json(str_updated_metadata_json, app_settings.get("DV_FILES", "dataset-files.json"))
 
         for file in db_manager.find_non_generated_files(dataset_id=self.dataset_id):
             logging.info(f'Ingesting file {file.name}. Size: {file.size} Path: {file.path}')
@@ -284,9 +284,9 @@ class DataverseIngester(Bridge):
 
             url_base = f"{self.target.base_url}/api/datasets/:persistentId/add?persistentId={pid}"
             headers = dmz_dataverse_headers('API_KEY', self.target.password)
-            timeout_seconds = settings.get("DATAVERSE_RESPONSE_TIMEOUT", 360000)
+            timeout_seconds = app_settings.get("DATAVERSE_RESPONSE_TIMEOUT", 360000)
             logging.info(f'Start ingesting file {file.name}. Size: {file.size}. Ingest to {url_base}')
-            if file.size < settings.get("MAX_INGEST_SIZE_USING_PYTHON", 100000000):
+            if file.size < app_settings.get("MAX_INGEST_SIZE_USING_PYTHON", 100000000):
                 logging.info(f'Ingest SMALL FILE using python: {file.name}')
                 with open(file.path, 'rb') as f:
                     files = {'file': (file.name, f)}
@@ -297,10 +297,10 @@ class DataverseIngester(Bridge):
                 logging.info("")
                 jsonData_str = json.dumps(jsonData)
                 try:
-                    output = f'{settings.DATA_TMP_BASE_DIR}/{self.app_name}/{self.dataset_id}/{str(uuid.uuid4().int)}.txt'
+                    output = f'{app_settings.DATA_TMP_BASE_DIR}/{self.app_name}/{self.dataset_id}/{str(uuid.uuid4().int)}.txt'
                     logging.info(f'Output: {output}')
                     result = subprocess.run(
-                        [settings.SHELL_SCRIPT_PATH, file.path, url_base, jsonData_str, self.target.password, output],
+                        [app_settings.SHELL_SCRIPT_PATH, file.path, url_base, jsonData_str, self.target.password, output],
                         check=True, text=True, capture_output=True
                     )
                     logging.info(f'File {file.name} is successfully ingested')

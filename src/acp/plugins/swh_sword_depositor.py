@@ -10,7 +10,7 @@ import sword2.deposit_receipt as dr
 from requests.auth import HTTPBasicAuth
 
 from src.acp.bridge import Bridge
-from src.acp.commons import settings, DepositStatus, transform, db_manager
+from src.acp.commons import app_settings, DepositStatus, transform, db_manager
 from src.acp.models.bridge_output_model import TargetDataModel, TargetResponse
 
 
@@ -49,7 +49,7 @@ class SwhSwordDepositor(Bridge):
         headers = {
             'Content-Type': 'application/atom+xml;type=entry',
         }
-        auth = HTTPBasicAuth(settings.swh_sword_username, settings.swh_sword_password)
+        auth = HTTPBasicAuth(app_settings.swh_sword_username, app_settings.swh_sword_password)
         response = requests.post(self.target.target_url, headers=headers, auth=auth, data=str_sword_payload)
         logging.info(f'status_code: {response.status_code}. Response: {response.text}')
         if response.status_code == 200 or response.status_code == 201:  # TODO: remove 200, use only 201
@@ -62,9 +62,9 @@ class SwhSwordDepositor(Bridge):
             status_url = deposit_response.alternate
             logging.info(f'Status request send to {status_url}')
             counter = 0
-            while True and (counter < settings.swh_api_max_retries):
+            while True and (counter < app_settings.swh_api_max_retries):
                 counter += 1
-                sleep(settings.swh_delay_polling_sword)
+                sleep(app_settings.swh_delay_polling_sword)
                 rsp = requests.get(status_url, headers=headers, auth=auth)
                 if rsp.status_code == 200:
                     rsp_text = rsp.text

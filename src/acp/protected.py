@@ -17,10 +17,9 @@ import httpx
 import jmespath
 import requests
 from fastapi import APIRouter, Request, HTTPException
-from fastapi.responses import JSONResponse
 from starlette.responses import FileResponse
 
-from src.acp.commons import settings, data, db_manager, get_class, assistant_repo_headers, handle_ps_exceptions, \
+from src.acp.commons import app_settings, data, db_manager, get_class, assistant_repo_headers, handle_ps_exceptions, \
     send_mail, delete_symlink_and_target
 from src.acp.dbz import TargetRepo, DataFile, Dataset, ReleaseVersion, DepositStatus, FilePermissions, \
     DatasetWorkState, DataFileWorkState, MetadataType
@@ -65,7 +64,7 @@ async def register_plugin(name: str, bridge_file: Request, overwrite: bool | Non
         raise HTTPException(status_code=400, detail="Unsupported content type")
 
     m_file = await bridge_file.body()
-    bridge_path = os.path.join(settings.PLUGINS_DIR, name)
+    bridge_path = os.path.join(app_settings.PLUGINS_DIR, name)
     with open(bridge_path, "w+") as file:
         file.write(m_file.decode())
 
@@ -128,7 +127,7 @@ async def process_inbox_dataset_submit(request: Request) -> {}:  # ReleaseVersio
     Raises:
         HTTPException: If there is an error during the processing of the dataset metadata.
     """
-    logging.info(f'Process inbox dataset metadata')
+    logging.info('Process inbox dataset metadata')
     rdm = await process_inbox(ReleaseVersion.SUBMIT, request)
     return rdm.model_dump(by_alias=True)
 
@@ -189,7 +188,7 @@ async def process_inbox(release_version, request):
 
     repo_config = retrieve_targets_configuration(idh.assistant_name)
     repo_assistant = RepoAssistantDataModel.model_validate_json(repo_config)
-    dataset_dir = os.path.join(settings.DATA_TMP_BASE_DIR, repo_assistant.app_name,
+    dataset_dir = os.path.join(app_settings.DATA_TMP_BASE_DIR, repo_assistant.app_name,
                                dataset_id.replace(":", "_").replace("/", "-"))
     if not os.path.exists(dataset_dir):
         os.makedirs(dataset_dir)
@@ -266,7 +265,7 @@ def delete_dataset_and_its_folder(dataset_id):
     Returns:
         dict: A dictionary containing the status of the deletion and the metadata ID.
     """
-    dataset_folder = os.path.join(settings.DATA_TMP_BASE_DIR, db_manager.find_app_name(dataset_id),
+    dataset_folder = os.path.join(app_settings.DATA_TMP_BASE_DIR, db_manager.find_app_name(dataset_id),
                                   dataset_id)
     logging.info(f'Delete dataset folder: {dataset_folder}')
     if os.path.exists(dataset_folder):
@@ -336,7 +335,7 @@ def process_metadata_record(dataset_id, idh, repo_assistant, tmp_dir):
     logging.info(f'Processing metadata record for {dataset_id}')
 
     if idh.metadata_type == MetadataType.JSON:
-        logging.info(f'Processing json metadata')
+        logging.info('Processing json metadata')
         registered_files = []
         file_names = []
         file_names_from_input = jmespath.search('"file-metadata"[*].name', idh.metadata)
@@ -392,7 +391,7 @@ def process_metadata_record(dataset_id, idh, repo_assistant, tmp_dir):
         dataset_state = DatasetWorkState.READY if not files_name_to_be_added else DatasetWorkState.NOT_READY
         metadata = json.dumps(idh.metadata)
     else:
-        logging.info(f'Processing xml metadata')
+        logging.info('Processing xml metadata')
         dataset_state = DatasetWorkState.READY
         metadata = idh.metadata
         registered_files = None
@@ -493,10 +492,10 @@ def list_files_with_suffix(directory: str, suffix: str) -> list:
 
 async def delete_file(file_id: str):
     logging.info(f"Deleting file {file_id}")
-    url = f'{settings.TUS_BASE_URL}/files/{file_id}'
+    url = f'{app_settings.TUS_BASE_URL}/files/{file_id}'
     headers = {
         "accept": "application/json",
-        "Authorization": f"Bearer {settings.dans_packaging_service_api_key}"
+        "Authorization": f"Bearer {app_settings.dans_packaging_service_api_key}"
     }
     async with httpx.AsyncClient() as client:
         try:
@@ -534,7 +533,7 @@ async def update_file_metadata(metadata_id: str, file_uuid: str) -> {}:
         HTTPException: If there is a file size mismatch.
     """
     logging.info(f'PATCH file metadata for metadata_id: {metadata_id} and file_uuid: {file_uuid}' )
-    tus_file = os.path.join(settings.DATA_TMP_BASE_TUS_FILES_DIR, file_uuid)
+    tus_file = os.path.join(app_settings.DATA_TMP_BASE_TUS_FILES_DIR, file_uuid)
     file_info_path = f'{tus_file}.info'
     if not os.path.exists(file_info_path):
         logging.error(f'File info NOT FOUND for {file_uuid}: {file_info_path}')
@@ -559,8 +558,8 @@ async def update_file_metadata(metadata_id: str, file_uuid: str) -> {}:
         raise HTTPException(status_code=400, detail='File size mismatch')
 
     db_record_metadata = db_manager.find_dataset(metadata_id)
-    dataset_folder = os.path.join(settings.DATA_TMP_BASE_DIR, db_record_metadata.app_name, metadata_id)
-    source_file_path = os.path.join(settings.DATA_TMP_BASE_TUS_FILES_DIR, file_uuid)
+    dataset_folder = os.path.join(app_settings.DATA_TMP_BASE_DIR, db_record_metadata.app_name, metadata_id)
+    source_file_path = os.path.join(app_settings.DATA_TMP_BASE_TUS_FILES_DIR, file_uuid)
     dest_file_path = os.path.join(dataset_folder, file_name)
     # Process the files
     logging.info(f'Processing using symlink {source_file_path} to {dest_file_path}')
@@ -568,7 +567,7 @@ async def update_file_metadata(metadata_id: str, file_uuid: str) -> {}:
     link_name = dest_file_path
     try:
         md5_hash = ""
-        if settings.get("use_md5_hash", False):
+        if app_settings.get("use_md5_hash", False):
             with open(source_file_path, 'rb') as file:
                 md5_hash = hashlib.md5(file.read()).hexdigest()
             # with open(source_file_path, "rb") as f:
@@ -701,7 +700,7 @@ def execute_bridges(datasetId, targets) -> None:
             break
 
     if len(results) == len(targets):
-        dataset_folder = os.path.join(settings.DATA_TMP_BASE_DIR, db_manager.find_dataset(ds_id=datasetId).app_name,
+        dataset_folder = os.path.join(app_settings.DATA_TMP_BASE_DIR, db_manager.find_dataset(ds_id=datasetId).app_name,
                                       datasetId)
         logging.info(f'Ingest SUCCESSFULL, DELETE {dataset_folder}')
 
@@ -732,7 +731,7 @@ def retrieve_targets_configuration(assistant_config_name: str) -> str:
     Raises:
         HTTPException: If the configuration URL returns a status code other than 200.
     """
-    repo_url = f'{settings.ASSISTANT_CONFIG_URL}/{assistant_config_name}'
+    repo_url = f'{app_settings.ASSISTANT_CONFIG_URL}/{assistant_config_name}'
     logging.info(f'Retrieve targets configuration from {repo_url}')
     rsp = requests.get(repo_url, headers=assistant_repo_headers)
     if rsp.status_code != 200:
@@ -810,46 +809,23 @@ def remove_files_and_directories(dir_path):
             logging.info(f"Directory {item_path} and all its contents have been removed")
 
 
-@router.delete("/delete-dir/{dir}", include_in_schema=False)
-def delete_inbox(dir: str):
+
+# Endpoint to retrieve application app_settings
+@router.get("/app_settings-reload", include_in_schema=False)
+async def get_app_settings():
     """
-    Endpoint to delete a directory.
+    Endpoint to retrieve and reload application app_settings.
 
-    This endpoint deletes the specified directory and all its contents.
-
-    Args:
-        dir (str): The name of the directory to be deleted.
+    This endpoint retrieves the current application app_settings, reloads them, and returns the updated app_settings.
 
     Returns:
-        dict: A dictionary containing the status of the deletion and the name of the deleted directory.
-
-    Raises:
-        HTTPException: If the specified directory is not found.
+        dict: A dictionary containing the updated application app_settings.
     """
-    directory = f"{settings.DATA_TMP_BASE_DIR}/{dir}"
-    if not os.path.exists(directory):
-        return HTTPException(status_code=404, detail=f"{directory} not found")
-    logging.info(f'Delete directory: {directory}')
-    remove_files_and_directories(directory)
-    return {"Deleted": "OK", "directory": directory}
-
-
-# Endpoint to retrieve application settings
-@router.get("/settings-reload", include_in_schema=False)
-async def get_settings():
-    """
-    Endpoint to retrieve and reload application settings.
-
-    This endpoint retrieves the current application settings, reloads them, and returns the updated settings.
-
-    Returns:
-        dict: A dictionary containing the updated application settings.
-    """
-    logging.info(f"Getting settings Before Load: {settings.as_dict()}")
-    logging.info("Reload settings")
-    settings.reload()
-    logging.info(f"Getting settings After Load: {settings.as_dict()}")
-    return settings.as_dict()
+    logging.info(f"Getting app_settings Before Load: {app_settings.as_dict()}")
+    logging.info("Reload app_settings")
+    app_settings.reload()
+    logging.info(f"Getting app_settings After Load: {app_settings.as_dict()}")
+    return app_settings.as_dict()
 
 @router.get("/dataset/{datasetId}/md", include_in_schema=False)
 def get_md(datasetId: str):
@@ -925,7 +901,7 @@ def get_db():
         Logs the action of downloading the database file.
     """
     logging.info('db-download')
-    return FileResponse(path=settings.DB_URL, filename="acp.db",
+    return FileResponse(path=app_settings.DB_URL, filename="acp.db",
                         media_type='application/octet-stream')
 
 
@@ -945,16 +921,3 @@ def delete_all_recs():
     """
     logging.info('Deleting all')
     return db_manager.delete_all()
-
-@router.get("/datasets", include_in_schema=False)
-async def get_db():
-    """
-    Endpoint to retrieve datasets.
-
-    This endpoint retrieves datasets from the database by executing a raw SQL query.
-
-    Returns:
-        JSONResponse: A JSON response containing the datasets retrieved from the database.
-    """
-    logging.info("Finding datasets")
-    return JSONResponse(content=db_manager.execute_raw_sql())
