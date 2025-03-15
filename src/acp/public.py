@@ -5,7 +5,7 @@ from fastapi import APIRouter, Request, HTTPException
 from starlette.responses import Response
 
 # from src import db
-from src.acp.commons import data, db_manager, settings, fetch_dv_json
+from src.acp.commons import data, db_manager, app_settings, fetch_dv_json
 from src.acp.dbz import ReleaseVersion
 from src.acp.models.app_model import OwnerAssetsModel, Asset, TargetApp
 
@@ -155,6 +155,6 @@ async def get_languages():
                 "es": "Spanish"
             }
     """
-    with open(settings.LANGUAGES_PATH, "r") as f:
+    with open(app_settings.LANGUAGES_PATH, "r") as f:
         languages = json.load(f)
     return languages

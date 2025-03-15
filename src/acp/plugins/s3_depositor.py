@@ -4,7 +4,7 @@ import json
 import logging
 
 from src.acp.bridge import Bridge
-from src.acp.commons import settings, create_s3_client
+from src.acp.commons import app_settings, create_s3_client
 from src.acp.models.bridge_output_model import TargetDataModel
 
 
@@ -30,7 +30,7 @@ class S3Depositor(Bridge):
         metadata = json.loads(self.metadata_rec.md)
 
         s3_client = create_s3_client()
-        s3_client.put_object(Bucket=settings.S3_BUCKET_NAME, Key=f'{settings.S3_Key}', Body=json.dumps(metadata))
+        s3_client.put_object(Bucket=app_settings.S3_BUCKET_NAME, Key=f'{app_settings.S3_Key}', Body=json.dumps(metadata))
 
         bridge_output_model = TargetDataModel()
 

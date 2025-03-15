@@ -7,7 +7,7 @@ data_tmp_base_dir_sword = "@format {env[BASE_DIR]}/data/tmp/sword"
 
 
 [default.keycloak_faircore4eosc_dev]
-    url="https://keycloak.dansdemo.nl"
+    url="http://localhost:9090"
     realms="faircore4eosc"
     client_id="faircore4eosc-auth"
 

@@ -16,11 +16,10 @@ from typing import Any, Callable
 import boto3
 import psutil
 import requests
-import tomli
 from akmi_utils import commons as a_commons
 from dynaconf import Dynaconf
 from fastapi import HTTPException
-from hypothesis import settings
+# from hypothesis import app_settings
 from jsoncomparison import Compare
 from requests_toolbelt.multipart.encoder import MultipartEncoder, MultipartEncoderMonitor
 from starlette import status
@@ -32,27 +31,27 @@ from src.acp.models.bridge_output_model import TargetDataModel, TargetResponse
 base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ["BASE_DIR"] = os.getenv("BASE_DIR", base_dir)
 
-settings = Dynaconf(root_path=f'{os.environ["BASE_DIR"]}/conf', settings_files=["*.toml"],
+app_settings = Dynaconf(root_path=f'{os.environ["BASE_DIR"]}/conf', settings_files=["*.toml"],
                     environments=True)
 data = {}
 
 project_details = a_commons.get_project_details(os.getenv("BASE_DIR"), ['name', 'version', 'description', 'title'])
 
-db_manager = DatabaseManager(db_dialect=settings.DB_DIALECT, db_url=settings.DB_URL, encryption_key=settings.DB_ENCRYPTION_KEY)
+db_manager = DatabaseManager(db_dialect=app_settings.DB_DIALECT, db_url=app_settings.DB_URL, encryption_key=app_settings.DB_ENCRYPTION_KEY)
 
 transformer_headers = {
     'Content-Type': 'application/json',
-    'Authorization': f'Bearer {settings.METADATA_TRANSFORMER_SERVICE_API_KEY}'
+    'Authorization': f'Bearer {app_settings.METADATA_TRANSFORMER_SERVICE_API_KEY}'
 }
 
 transformer_headers_xml = {
     'Content-Type': 'application/xml',
-    'Authorization': f'Bearer {settings.METADATA_TRANSFORMER_SERVICE_API_KEY}'
+    'Authorization': f'Bearer {app_settings.METADATA_TRANSFORMER_SERVICE_API_KEY}'
 }
 
 assistant_repo_headers = {
     'Content-Type': 'application/json',
-    'Authorization': f'Bearer {settings.ACP_CONFIG_ASSISTANT_SERVICE_API_KEY}'
+    'Authorization': f'Bearer {app_settings.ACP_CONFIG_ASSISTANT_SERVICE_API_KEY}'
 }
 
 def get_version():
@@ -65,8 +64,6 @@ def get_version():
     Returns:
     str: The version of the package.
     """
-    with open(os.path.join(os.getenv("BASE_DIR"), 'pyproject.toml'), 'rb') as file:
-        package_details = tomli.load(file)
     return project_details['version']
 
 
@@ -77,7 +74,7 @@ def get_name():
 #     """
 #     This function sets up the logger for the application.
 #
-#     It iterates over the list of loggers specified in the settings, and for each logger, it:
+#     It iterates over the list of loggers specified in the app_settings, and for each logger, it:
 #     - Gets or creates a logger with the specified name.
 #     - Creates a formatter with the specified format.
 #     - Creates a file handler that writes to the specified log file in append mode, and sets its formatter.
@@ -87,12 +84,12 @@ def get_name():
 #     - Adds the file handler and the stream handler to the logger.
 #     - Logs a startup message at the debug level, which includes the current time and the Python version.
 #
-#     The logger settings (name, format, log file, and log level) are read from the `LOGGERS` setting in the application's configuration.
+#     The logger app_settings (name, format, log file, and log level) are read from the `LOGGERS` setting in the application's configuration.
 #
 #     The startup message is logged using the `logger` function defined elsewhere in this plugin.
 #     """
 #     now = datetime.utcnow()
-#     for log in settings.LOGGERS:
+#     for log in app_settings.LOGGERS:
 #         log_setup = logging.getLogger(log.get('name'))
 #         formatter = logging.Formatter(log.get('log_format'))
 #         file_handler = logging.FileHandler(log.get('log_file'), mode='a')
@@ -286,7 +283,7 @@ def handle_deposit_exceptions(
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        #logger(f'Enter to handle_deposit_exceptions for {func.__name__}. args: {args}', settings.LOG_LEVEL, LOG_NAME_PS)
+        #logger(f'Enter to handle_deposit_exceptions for {func.__name__}. args: {args}', app_settings.LOG_LEVEL, LOG_NAME_PS)
         try:
             rv = func(*args, **kwargs)
             return rv
@@ -391,7 +388,7 @@ def send_mail(subject: str, text: str, recipients: list[str] = None):
     Send an email with the specified subject and text.
 
     This function sends an email using the SMTP protocol. The email is sent from the sender's email address
-    to the recipient's email address, with the specified subject and text. The email settings (sender email,
+    to the recipient's email address, with the specified subject and text. The email app_settings (sender email,
     app password, recipient email, and mail subject prefix) are read from the application's configuration.
 
     Args:
@@ -401,20 +398,20 @@ def send_mail(subject: str, text: str, recipients: list[str] = None):
     Raises:
         Exception: If there is an error sending the email.
     """
-    sender_email = settings.MAIL_USR
-    app_password = settings.MAIL_PASS
+    sender_email = app_settings.MAIL_USR
+    app_password = app_settings.MAIL_PASS
     if not recipients:
-        recipients = settings.MAIL_TO
+        recipients = app_settings.MAIL_TO
 
     message = MIMEMultipart()
     message['From'] = sender_email
-    message['Subject'] = f'{settings.get("MAIL_SUBJECT_PREFIX", "mail_subject_prefix not set")}: {subject}'
+    message['Subject'] = f'{app_settings.get("MAIL_SUBJECT_PREFIX", "mail_subject_prefix not set")}: {subject}'
     message.attach(MIMEText(text, 'plain'))
 
-    if settings.get('send_mail', True):
+    if app_settings.get('send_mail', True):
         try:
-            with smtplib.SMTP(settings.SMTP_SERVER, settings.SMTP_PORT) as server:
-                if settings.get('use_tls', True):
+            with smtplib.SMTP(app_settings.SMTP_SERVER, app_settings.SMTP_PORT) as server:
+                if app_settings.get('use_tls', True):
                     server.starttls()
                     server.login(sender_email, app_password)
                 for recipient_email in recipients:
@@ -431,7 +428,7 @@ def send_mail(subject: str, text: str, recipients: list[str] = None):
 
 
 def dmz_dataverse_headers(username, password) -> dict:
-    headers = {'X-Authorization': settings.dmz_x_authorization_value} if settings.exists("dmz_x_authorization_value",
+    headers = {'X-Authorization': app_settings.dmz_x_authorization_value} if app_settings.exists("dmz_x_authorization_value",
                                                                                          fresh=False) else {}
     if username == 'API_KEY':
         headers["X-Dataverse-key"] = password
@@ -488,7 +485,7 @@ def upload_large_file(url, file_path, json_data, api_key, file_name=None):
         monitor = MultipartEncoderMonitor(encoder, callback)
         logging.info(f'upload_large_file  api_key: {api_key}')
         response = requests.post(url, data=monitor, headers={"X-Dataverse-key": api_key,
-                                                             'X-Authorization': settings.dmz_x_authorization_value,
+                                                             'X-Authorization': app_settings.dmz_x_authorization_value,
                                                              'Content-Type': monitor.content_type})
 
         logging.info(f'upload_large_file response: {response.status_code}')
@@ -547,7 +544,7 @@ def zip_with_progress(file_path, zip_path):
                 # Remove the temporary file
                 os.remove(temp_chunk_path)
 
-    logging.info(f"Zipping completed.")
+    logging.info(f"Zipping of '{file_path}' completed.")
 
 
 def delete_symlink_and_target(link_name):
@@ -631,7 +628,7 @@ def zip_a_zipfile_with_progress(original_zip_path, new_zip_path):
     None
     """
     # Get the size of the original zip file
-    original_zip_size = os.path.getsize(original_zip_path)
+    # original_zip_size = os.path.getsize(original_zip_path)
     arcname = original_zip_path.split('/')[-1]
 
     # Create a new zip file (outer zip)
@@ -652,21 +649,21 @@ def escape_invalid_json_characters(json_string: str) -> str:
 
 def create_s3_client():
     """
-    Initializes and returns an S3 client using the provided settings.
+    Initializes and returns an S3 client using the provided app_settings.
 
-    The settings for the S3 client are retrieved from the global `settings` object, which includes:
+    The app_settings for the S3 client are retrieved from the global `app_settings` object, which includes:
     - `S3_STORAGE_ENDPOINT`: The endpoint URL for the S3 storage.
     - `S3_ACCESS_KEY_ID`: The AWS access key ID.
     - `S3_ACCESS_KEY_SECRET`: The AWS secret access key.
 
     Returns:
-        boto3.client: An S3 client instance configured with the specified settings.
+        boto3.client: An S3 client instance configured with the specified app_settings.
     """
     return boto3.client(
         's3',
-        endpoint_url=settings.S3_STORAGE_ENDPOINT,
-        aws_access_key_id=settings.S3_ACCESS_KEY_ID,
-        aws_secret_access_key=settings.S3_ACCESS_KEY_SECRET
+        endpoint_url=app_settings.S3_STORAGE_ENDPOINT,
+        aws_access_key_id=app_settings.S3_ACCESS_KEY_ID,
+        aws_secret_access_key=app_settings.S3_ACCESS_KEY_SECRET
     )
 
 

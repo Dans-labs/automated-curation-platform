@@ -162,3 +162,4 @@ cython_debug/
 /conf/.secrets.swh.toml
 /conf/.secrets.toml
 logs/
+/data/db/acp.db

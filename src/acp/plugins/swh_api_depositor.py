@@ -8,7 +8,7 @@ import jmespath
 import requests
 
 from src.acp.bridge import Bridge
-from src.acp.commons import settings
+from src.acp.commons import app_settings
 from src.acp.dbz import DepositStatus
 from src.acp.models.bridge_output_model import TargetDataModel, TargetResponse, ResponseContentType, IdentifierItem, \
     IdentifierProtocol
@@ -38,7 +38,7 @@ class SwhApiDepositor(Bridge):
         target_swh = jmespath.search("metadata.repository_url.value",#TODO: Move to acp config assistant as a json element
                                      json.loads(self.metadata_rec.md))
         tdm = TargetDataModel(response=target_response)
-        headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {settings.SWH_ACCESS_TOKEN}'}
+        headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {app_settings.SWH_ACCESS_TOKEN}'}
         logging.info(f'self.target.target_url: {self.target.target_url}')
         swh_url = f'{self.target.target_url}/{target_swh}/'
         logging.info(f'swh_url: {swh_url}')
@@ -49,7 +49,7 @@ class SwhApiDepositor(Bridge):
             logging.info(f'swh_api response json: {json.dumps(api_resp_json)}')
             goto_sleep = False
             counter = 0  # TODO: Refactor using Tenancy!
-            while True and (counter < settings.SWH_API_MAX_RETRIES):
+            while True and (counter < app_settings.SWH_API_MAX_RETRIES):
                 counter += 1
                 swh_check_url = api_resp_json.get("request_url")
                 step1_check_resp = requests.get(swh_check_url, headers=headers)
@@ -58,7 +58,7 @@ class SwhApiDepositor(Bridge):
                     logging.info(f'{swh_check_url} response: {json.dumps(swh_resp_json)}')
                     if swh_resp_json.get('save_task_status') == DepositStatus.FAILED:
                         tdm.deposit_status = DepositStatus.FAILED
-                        logging.error(f"save_task_status is failed.")
+                        logging.error("save_task_status is failed.")
                         target_response.content = swh_resp_json
                         target_response.content_type = ResponseContentType.JSON
                         break
@@ -114,7 +114,7 @@ class SwhApiDepositor(Bridge):
                         goto_sleep = True
                 if goto_sleep:
                     logging.info(f'goto_sleep: {goto_sleep}')
-                    sleep(settings.SWH_DELAY_POLLING)
+                    sleep(app_settings.SWH_DELAY_POLLING)
 
         else:
             logging.error(f'ERROR api_resp.status_code: {api_resp.status_code}')

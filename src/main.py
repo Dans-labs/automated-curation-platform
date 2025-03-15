@@ -8,7 +8,7 @@ Modules:
 - `public`: Contains public access routes.
 - `protected`: Contains protected access routes.
 - `tus_files`: Contains routes for handling file uploads using the Tus protocol.
-- `commons`: Contains common settings, logger setup, and utility functions.
+- `commons`: Contains common app_settings, logger setup, and utility functions.
 - `InspectBridgeModule`: Provides a utility for inspecting bridge plugin classes.
 - `db_manager`: Manages the creation of the database and tables.
 
@@ -40,7 +40,7 @@ from starlette import status
 from starlette.middleware.cors import CORSMiddleware
 
 from src.acp import protected, public
-from src.acp.commons import settings, data, db_manager, inspect_bridge_plugin, \
+from src.acp.commons import app_settings, data, db_manager, inspect_bridge_plugin, \
     get_version, get_name, project_details
 from src.acp.tus_files import upload_files
 
@@ -62,7 +62,7 @@ async def lifespan(application: FastAPI):
 
     """
     print('start up')
-    if not os.path.exists(settings.DB_URL):
+    if not os.path.exists(app_settings.DB_URL):
         logging.info('Creating database')
         db_manager.create_db_and_tables()
     else:
@@ -74,7 +74,7 @@ async def lifespan(application: FastAPI):
     yield
 
 
-api_keys = [settings.ACP_SERVICE_API_KEY]
+api_keys = [app_settings.ACP_SERVICE_API_KEY]
 
 security = HTTPBearer()
 
@@ -99,7 +99,7 @@ def auth_header(request: Request, auth_cred: Annotated[HTTPAuthorizationCredenti
     if api_key in api_keys:
         return
 
-    keycloak_env = settings.get(f"keycloak_{request.headers['auth-env-name']}")
+    keycloak_env = app_settings.get(f"keycloak_{request.headers['auth-env-name']}")
     if not keycloak_env:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Forbidden")
 
@@ -129,12 +129,12 @@ def pre_startup_routine(app: FastAPI) -> None:
 app = FastAPI(title=project_details['title'], description=project_details['description'],
               version=project_details['version'], lifespan=lifespan)
 
-LOG_FILE = settings.LOG_FILE
+LOG_FILE = app_settings.LOG_FILE
 log_config = uvicorn.config.LOGGING_CONFIG
-logging.basicConfig(filename=settings.LOG_FILE, level=settings.LOG_LEVEL,
-                        format=settings.LOG_FORMAT)
+logging.basicConfig(filename=app_settings.LOG_FILE, level=app_settings.LOG_LEVEL,
+                        format=app_settings.LOG_FORMAT)
 
-if settings.otlp_enable is False:
+if app_settings.otlp_enable is False:
     logging.info("Logging configured without OTLP")
 else:
     logging.info("OTLP enabled")
@@ -171,9 +171,9 @@ def iterate_saved_bridge_plugin_dir():
     and updates the data dictionary with the class name.
 
     """
-    for filename in os.listdir(settings.PLUGINS_DIR):
+    for filename in os.listdir(app_settings.PLUGINS_DIR):
         if filename.endswith(".py") and not filename.startswith('__'):
-            plugins_path = os.path.join(settings.PLUGINS_DIR, filename)
+            plugins_path = os.path.join(app_settings.PLUGINS_DIR, filename)
             for cls_name in inspect_bridge_plugin(plugins_path):
                 data.update(cls_name)
 
@@ -182,5 +182,5 @@ def iterate_saved_bridge_plugin_dir():
 if __name__ == "__main__":
     logging.info('START Automated Curation Platform')
     logging.info(f'APP_NAME: {APP_NAME}')
-    logging.info(f'Settings: {settings.to_dict()}')
+    logging.info(f'app_settings: {app_settings.to_dict()}')
     uvicorn.run(app, host="0.0.0.0", port=EXPOSE_PORT, log_config=log_config)
