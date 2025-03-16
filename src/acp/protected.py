@@ -495,7 +495,7 @@ async def delete_file(file_id: str):
     url = f'{app_settings.TUS_BASE_URL}/files/{file_id}'
     headers = {
         "accept": "application/json",
-        "Authorization": f"Bearer {app_settings.dans_packaging_service_api_key}"
+        "Authorization": f"Bearer {app_settings.ACP_SERVICE_API_KEY}"
     }
     async with httpx.AsyncClient() as client:
         try:
