@@ -21,7 +21,7 @@ from src.acp.commons import (
     handle_deposit_exceptions, dmz_dataverse_headers, zip_a_zipfile_with_progress, transform_xml,
     processed_metadata_handler,
 )
-from src.acp.dbz import ReleaseVersion, DataFile, DepositStatus, FilePermissions, DataFileWorkState, MetadataType
+from src.acp.dbz import StateVersion, DataFile, DepositStatus, FilePermissions, DataFileWorkState, MetadataType
 from src.acp.models.bridge_output_model import IdentifierItem, IdentifierProtocol, TargetResponse, ResponseContentType
 
 
@@ -76,7 +76,7 @@ class DataverseIngester(Bridge):
                     for gf in generated_files:
                         files_metadata.append({"name": gf.name, "mimetype": gf.mime_type, "private": gf.permissions == FilePermissions.PRIVATE})
                     if generated_files:
-                        db_manager.insert_datafiles(generated_files)
+                        db_manager.insert_datafiles(self.dataset_id, generated_files)
 
                     if files_metadata:
                         md_json["file-metadata"] = files_metadata
@@ -137,7 +137,7 @@ class DataverseIngester(Bridge):
                     tdm.deposited_metadata = "The dataset and its file is successfully ingested"
                     logging.info('The dataset and its file is successfully ingested"')
                     target_repo.status_code = status.HTTP_200_OK
-                    if self.target.initial_release_version == ReleaseVersion.PUBLISHED:
+                    if self.target.initial_release_version == StateVersion.PUBLISHED:
                         logging.info('Publish the dataset')
                         target_repo.status_code = self.__publish_dataset(pid)
                         tdm.deposited_metadata = "The dataset and its files successfully published" if target_repo.status_code == status.HTTP_200_OK else "The dataset is unsuccessfully published"

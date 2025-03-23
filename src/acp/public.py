@@ -1,12 +1,13 @@
 import json
 import logging
+from typing import Optional
 
 from fastapi import APIRouter, Request, HTTPException
 from starlette.responses import Response
 
 # from src import db
 from src.acp.commons import data, db_manager, app_settings, fetch_dv_json
-from src.acp.dbz import ReleaseVersion
+from src.acp.dbz import StateVersion
 from src.acp.models.app_model import OwnerAssetsModel, Asset, TargetApp
 
 router = APIRouter()
@@ -59,23 +60,22 @@ async def progress_state(owner_id: str, req: Request, page: int = 1, page_size: 
         oam.owner_id = owner_id
         for dataset in datasets:
             asset = Asset()
-            asset.dataset_id = str(dataset.id)
-            asset.release_version = dataset.release_version.name
+            asset.md_id = str(dataset.md_id)
+            asset.md_version = dataset.version
             asset.title = dataset.title
             asset.created_date = dataset.created_date.strftime('%Y-%m-%d %H:%M:%S')
             asset.saved_date = dataset.saved_date.strftime('%Y-%m-%d %H:%M:%S')
             asset.submitted_date = dataset.submitted_date.strftime(
                 '%Y-%m-%d %H:%M:%S') if dataset.submitted_date else ''
-            asset.release_version = dataset.release_version.name
+            asset.md_state_version = dataset.md_state_version
             asset.version = dataset.version if dataset.version else ''
 
             # Find target repositories by dataset ID
-            targets_repo = db_manager.find_target_repos_by_dataset_id(str(dataset.id))
-            logging.info(f'dataset release version: {dataset.release_version}')
-            print(dataset.release_version)
+            targets_repo = db_manager.find_target_repos_by_dataset_id(dataset.id)
+            # logging.info(f'dataset state version: {dataset.md_state_version}')
 
             # Process target repositories if the dataset is not in DRAFT release version
-            if dataset.release_version is not ReleaseVersion.DRAFT:
+            if dataset.md_state_version is not StateVersion.DRAFT:
                 for target_repo in targets_repo:
                     target = TargetApp()
                     target.repo_name = target_repo.name
@@ -108,8 +108,8 @@ async def progress_state(owner_id: str, req: Request, page: int = 1, page_size: 
     return []
 
 
-@router.get("/dataset/{datasetId}")
-async def find_dataset(datasetId: str):
+@router.get("/dataset/{metadata_id}")
+async def find_dataset(metadata_id: str, md_state_version: Optional[str] = 'DRAFT'):
     """
     Endpoint to retrieve a dataset and its associated targets by dataset ID.
 
@@ -121,9 +121,10 @@ async def find_dataset(datasetId: str):
                   otherwise an empty dictionary.
     """
     # logging.debug(f'find_metadata_by_metadata_id - metadata_id: {metadata_id}')
-    logging.info(f'find_metadata_by_metadata_id - metadata_id: {datasetId}')
-    dataset = db_manager.find_dataset_and_targets(datasetId)
-    if dataset.dataset_id:
+    logging.info(f'find_metadata_by_metadata_id - metadata_id: {metadata_id}')
+    state_version = StateVersion(md_state_version)
+    dataset = db_manager.find_dataset_and_targets_by_md_id_and_state_version(metadata_id, state_version)
+    if dataset.md_id:
         try:
             dataset.md = json.loads(dataset.md)
             return Response(content=dataset.model_dump_json(by_alias=True), media_type="application/json")

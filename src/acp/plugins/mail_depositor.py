@@ -35,7 +35,7 @@ class Mail(Bridge):
 
         tdm = TargetDataModel()
         try:
-            send_mail(self.metadata_rec.title, self.metadata_rec.md, [parsed_url.path])
+            send_mail(self.metadata_rec.title, self.metadata_rec.md)
             tdm.deposit_status = DepositStatus.SUCCESS
         except ValueError as e:
             logging.error(f'Failed to send email: {e}')

@@ -401,7 +401,7 @@ def send_mail(subject: str, text: str, recipients: list[str] = None):
     sender_email = app_settings.MAIL_USR
     app_password = app_settings.MAIL_PASS
     if not recipients:
-        recipients = app_settings.MAIL_TO
+        recipients = list(app_settings.MAIL_TO)
 
     message = MIMEMultipart()
     message['From'] = sender_email

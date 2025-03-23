@@ -46,7 +46,7 @@ class InboxDatasetDataModel:
     title: str = ''
     metadata: dict
     metadata_type: str = ''
-    release_version: str
+    state_version: str
 
 
 class TargetApp(BaseModel):
@@ -85,23 +85,24 @@ class Asset(BaseModel):
     The class includes several attributes, each with specific types and optional aliases.
 
     Attributes:
-        dataset_id (str): The ID of the dataset, aliased as 'dataset-id'.
+        md_id (str): The ID of the dataset, aliased as 'dataset-id'.
         title (str): The title of the asset.
         md (str): The metadata of the asset.
         created_date (str): The creation date of the asset, aliased as 'created-date'.
         saved_date (str): The saved date of the asset, aliased as 'saved-date'.
         submitted_date (str): The submitted date of the asset, aliased as 'submitted-date'.
-        release_version (str): The release version of the asset, aliased as 'release-version'.
+        md_state_version (str): The release version of the asset, aliased as 'release-version'.
         version (str): The version of the asset.
         targets (List[TargetApp]): The list of target applications associated with the asset.
     """
-    dataset_id: str = Field(None, alias='dataset-id')
+    md_id: str = Field(None, alias='dataset-id')
     title: str = ''
     md: dict|str = ''
     created_date: datetime|str = Field(None, alias='created-date')
     saved_date: datetime|str = Field(None, alias='saved-date')
     submitted_date: datetime|str = Field(None, alias='submitted-date')
-    release_version: str = Field(None, alias='release-version')
+    md_version: str = Field(None, alias='dataset-version')
+    md_state_version: str = Field(None, alias='state-version')
     version: str = ''
     targets: List[TargetApp] = []
 

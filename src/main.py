@@ -39,7 +39,7 @@ from keycloak import KeycloakOpenID, KeycloakAuthenticationError
 from starlette import status
 from starlette.middleware.cors import CORSMiddleware
 
-from src.acp import protected, public
+from src.acp import protected, public, protected_admin
 from src.acp.commons import app_settings, data, db_manager, inspect_bridge_plugin, \
     get_version, get_name, project_details
 from src.acp.tus_files import upload_files
@@ -146,6 +146,7 @@ pre_startup_routine(app)
 # register routers
 app.include_router(public.router, tags=["Public"], prefix="")
 app.include_router(protected.router, tags=["Protected"], prefix="", dependencies=[Depends(auth_header)])
+app.include_router(protected_admin.router, tags=["Admin"], prefix="", dependencies=[Depends(auth_header)])
 
 app.include_router(upload_files, prefix="/files", include_in_schema=True, dependencies=[Depends(auth_header)])
 # app.include_router(tus_files.router, prefix="", include_in_schema=False)

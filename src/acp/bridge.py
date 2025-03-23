@@ -35,7 +35,7 @@ class Bridge(ABC):
         This class is expected to be subclassed with a concrete implementation of the `deposit` method.
     """
 
-    dataset_id: str
+    dataset_id: int
     target: Target
     db_manager: DatabaseManager = field(init=False)
     metadata_rec: Dataset = field(init=False)
@@ -55,11 +55,11 @@ class Bridge(ABC):
             This method is automatically called by the dataclasses plugin after the object is created.
         """
         object.__setattr__(self, 'db_manager', db_manager)
-        object.__setattr__(self, 'metadata_rec', self.db_manager.find_dataset(self.dataset_id))
+        object.__setattr__(self, 'metadata_rec', self.db_manager.find_dataset_by_id(self.dataset_id))
         object.__setattr__(self, 'app_name', self.metadata_rec.app_name)
         object.__setattr__(self, 'data_file_rec', self.db_manager.find_files(self.dataset_id))
         object.__setattr__(self, 'dataset_dir', os.path.join(app_settings.DATA_TMP_BASE_DIR,
-                                                             self.app_name, self.dataset_id))
+                                                             self.app_name, str(self.dataset_id)))
         self.save_state()
 
     @classmethod
