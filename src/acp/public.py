@@ -93,10 +93,11 @@ async def find_dataset(dataset_id: str, req: Request):
     app_name = repo_assistant.app_name
     db_manager = data[app_name]
     asset = db_manager.find_dataset_and_targets(dataset_id, exclude_target=True)
+
     if asset.dataset_id:
         try:
-            pretty_json = json.dumps(json.loads(asset.md), indent=4)
-            return Response(content=pretty_json, media_type="application/json")
+            asset.md = json.loads(asset.md)# The dataset.metadata_content is a string, convert it to a dictionary
+            return Response(content=asset.model_dump_json(by_alias=True), media_type="application/json")
         except json.JSONDecodeError:
             return Response(content=asset.md, media_type="application/xml")
 
