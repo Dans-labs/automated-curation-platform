@@ -157,7 +157,7 @@ async def process_inbox(status, request):
                                  metadata_type=MetadataType(idh.metadata_type))
 
 
-    dataset = db_manager.update_metadata(db_record_metadata)
+    dataset = db_manager.update_dataset(db_record_metadata)
 
     if dataset.status not in [StateVersion.SUBMITTED, StateVersion.RESUBMIT]:
         db_recs_target_repo = process_target_repos(repo_assistant, idh.target_creds)

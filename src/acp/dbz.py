@@ -529,7 +529,7 @@ class DatabaseManager:
             rst = results
         return rst
 
-    def update_metadata(self, dataset: Dataset) -> Dataset:
+    def update_dataset(self, dataset: Dataset) -> Dataset:
         with Session(self.engine) as session:
             statement = select(Dataset).where(Dataset.id == dataset.id)
             results = session.exec(statement)

@@ -35,14 +35,14 @@ class SwhSwordDepositor(Bridge):
         """
         output_model = TargetDataModel()
         # Create SWORD payload
-        swh_form_md = json.loads(self.dataset_rec.md)
+        swh_form_metadata_content = json.loads(self.dataset_rec.metadata_content)
         dv_target = self.db_manager.find_target_repo(self.dataset_id, self.target.input.from_target_name)
         if dv_target:
-            swh_form_md.update({"doi": json.loads(dv_target.target_output)['response']['identifiers'][0]['value']})
-        logging.info(f"SwhSwordDepositor- swh_form_md - after update (doi): {json.dumps(swh_form_md)}")
+            swh_form_metadata_content.update({"doi": json.loads(dv_target.target_service_response)['response']['identifiers'][0]['value']})
+        logging.info(f"SwhSwordDepositor- swh_form_metadata_content - after update (doi): {json.dumps(swh_form_metadata_content)}")
         str_sword_payload = transform(
             transformer_url=self.target.metadata.transformed_metadata[0].transformer_url,
-            str_tobe_transformed=json.dumps(swh_form_md)
+            str_tobe_transformed=json.dumps(swh_form_metadata_content)
         )
         logging.info(f'deposit to "{self.target.target_url}"')
         logging.info(f'payload: "{str_sword_payload}"')

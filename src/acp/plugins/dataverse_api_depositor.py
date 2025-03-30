@@ -64,8 +64,9 @@ class DataverseIngester(Bridge):
 
             if self.target.input:
                 input_from_prev_target = self.db_manager.find_target_repo(self.dataset_id, self.target.input.from_target_name)
-                md_json[self.target.input.from_target_name] = json.loads(input_from_prev_target.target_output)['response']['identifiers'][0]['value']
-                self.db_manager.update_dataset_md(self.dataset_id, json.dumps(md_json))
+                md_json[self.target.input.from_target_name] = json.loads(input_from_prev_target.target_service_response)['response']['identifiers'][0]['value']
+                self.dataset_rec.metadata_content = json.dumps(md_json)
+                self.db_manager.update_dataset(self.dataset_rec)
 
             if self.target.metadata:
                 files_metadata = jmespath.search('"file-metadata"[*]', md_json)
@@ -96,7 +97,7 @@ class DataverseIngester(Bridge):
             str_updated_metadata = json.dumps(md_json)
             self.dataset_rec.metadata_content = str_updated_metadata
 
-            self.db_manager.update_metadata(self.dataset_rec)
+            self.db_manager.update_dataset(self.dataset_rec)
         else:
             str_updated_metadata = self.dataset_rec.metadata_content
 
