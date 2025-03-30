@@ -1,26 +1,23 @@
 import base64
 import json
 import logging
-import sqlite3
-from contextlib import closing
-from datetime import datetime, timezone
+import os
 from enum import StrEnum, auto
-from typing import List, Optional, Sequence, Any
+from typing import Any
 
 from cryptography.fernet import Fernet
-from sqlalchemy import text, delete, inspect, UniqueConstraint, func, and_
+from sqlalchemy import delete, inspect, func, and_
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import SQLModel, Field, create_engine, Session, select
-
+from sqlmodel import create_engine, Session, select
 from src.acp.models.app_model import Asset, TargetApp
 
-'''
-import logging
-logging.basicConfig()
-logger = logging.getLogger('sqlalchemy.engine')
-logger.setLevel(logging.DEBUG)
-# run sqlmodel code after this
-'''
+
+from datetime import datetime, timezone
+from sqlmodel import SQLModel, Field, Relationship
+from typing import Optional, List
+from enum import Enum
+from sqlalchemy.orm import selectinload
+
 
 class StateVersion(StrEnum):
     DRAFT = 'DRAFT'
@@ -29,33 +26,14 @@ class StateVersion(StrEnum):
     PUBLISHING = 'PUBLISHING'
     SUBMIT = 'SUBMIT'
     SUBMITTED = 'SUBMITTED'
+    RESUBMIT = 'RESUBMIT'
+    RESUBMITTED = 'RESUBMITTED'
+    FAILED = 'FAILED'
 
 class MetadataType(StrEnum):
     JSON = 'application/json'
     XML = 'application/xml'
     TEXT = 'text/plain'
-
-class DepositStatus(StrEnum):
-    INITIAL = auto()
-    PROGRESS = auto()
-    FINISH = auto()
-    REJECTED = auto()
-    FAILED = auto()
-    ERROR = auto()
-    SUCCESS = auto()
-    ACCEPTED = auto()
-    FINALIZING = auto()
-    SUBMITTED = auto()
-    PUBLISHED = auto()
-    UNDEFINED = auto()
-    DEPOSITED = auto()
-
-
-class DataFileWorkState(StrEnum):
-    GENERATED = "GENERATED"
-    UPLOADED = "UPLOADED"
-    REGISTERED = "REGISTERED"
-
 
 class DatasetWorkState(StrEnum):
     NOT_READY = 'not-ready'
@@ -63,95 +41,126 @@ class DatasetWorkState(StrEnum):
     RELEASED = auto()
 
 
-class FilePermissions(StrEnum):
-    PUBLIC = auto()
-    PRIVATE = auto()
+# class FilePermissions(StrEnum):
+#     PUBLIC = auto()
+#     PRIVATE = auto()
 
 
-# Define the Metadata model
+class DatasetStatus(str, Enum):
+    DRAFT = "DRAFT"
+    SUBMIT = "SUBMIT"
+    SUBMITTED = "SUBMITTED"
+    RESUBMIT = "RESUBMIT"
+    RESUBMITTED = "RESUBMITTED"
+
+
+
 class Dataset(SQLModel, table=True):
     __tablename__ = "dataset"
 
-    id: int = Field(default=None, primary_key=True)
-    md_id: str = Field(primary_key=True, index=True)
+    id: str = Field(primary_key=True, index=True)
     title: Optional[str] = Field(nullable=True)
     owner_id: str = Field(index=True)
-    created_date: datetime =  datetime.now(timezone.utc)
-    saved_date: datetime =  datetime.now(timezone.utc)
-    submitted_date: Optional[datetime]
-    app_name: str = Field(index=True)
-    md: str  # https://www.sqlite.org/fasterthanfs.html
-    md_type: MetadataType = MetadataType.JSON
-    md_state_version: StateVersion = StateVersion.DRAFT
-    version: str = StateVersion.DRAFT.DRAFT
-    state: DatasetWorkState = DatasetWorkState.NOT_READY
 
-    def encrypt_md(self, cipher_suite):
-        if self.md is not None:
-            self.md = cipher_suite.encrypt(self.md.encode()).decode()
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    saved_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    submitted_at: Optional[datetime] = None
+
+    metadata_content: str = Field(default="{}", nullable=False)  # Renamed to avoid conflict
+    metadata_type: MetadataType = Field(default= MetadataType.JSON, nullable=False)
+
+    status: DatasetStatus = Field(default=DatasetStatus.DRAFT)
+    submission_ready: bool = Field(default=False)
+
+    # Relationships
+    target_repos: List["TargetRepo"] = Relationship(back_populates="dataset")
+    data_files: List["DataFile"] = Relationship(back_populates="dataset")
+
+    def encrypt_metadata_content(self, cipher_suite):
+        if self.metadata_content:
+            self.metadata_content = cipher_suite.encrypt(self.metadata_content.encode()).decode()
         else:
-            raise ValueError("The 'md' attribute is None and cannot be encrypted.")
+            raise ValueError("The 'metadata_content' attribute is None and cannot be encrypted.")
 
-    def decrypt_md(self, cipher_suite):
-        self.md = cipher_suite.decrypt(self.md.encode()).decode()
+    def decrypt_metadata_content(self, cipher_suite):
+        self.metadata_content = cipher_suite.decrypt(self.metadata_content.encode()).decode()
 
 
-# Define the TargetRepo model
+class DepositStatus(str, Enum):
+    PENDING = "PENDING"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    INITIAL = "INITIAL"
+    PROGRESS = "PROGRESS"
+    FINISH = "FINISH"
+    REJECTED = "REJECTED"
+    ERROR = "ERROR"
+    SUCCESS = "SUCCESS"
+    ACCEPTED = "ACCEPTED"
+    FINALIZING = "FINALIZING"
+    SUBMITTED = "SUBMITTED"
+    PUBLISHED = "PUBLISHED"
+    UNDEFINED = "UNDEFINED"
+    DEPOSITED = "DEPOSITED"
+
+
 class TargetRepo(SQLModel, table=True):
     __tablename__ = "target_repo"
-    __table_args__ = (
-        UniqueConstraint("ds_id", "name", name="unique_dataset_id_target_repo_name"),
-    )
+
     id: int = Field(default=None, primary_key=True)
-    ds_id: int = Field(foreign_key="dataset.id")
+    dataset_id: str = Field(foreign_key="dataset.id", index=True)
     name: str = Field(index=True)
     display_name: str = Field(index=True)
-    config: str
+    configuration: str = ""
     url: str
-    deposit_status: Optional[DepositStatus]
-    deposit_time: Optional[datetime]
-    duration: float = 0.0
-    target_output: Optional[str]
+    deposit_status: Optional[DepositStatus] = Field(default=DepositStatus.PENDING)  # Using Enum
+    deposited_at: Optional[datetime]
+    deposit_duration: float = 0.0 #the amount of time taken for the deposit process
+    target_service_response: Optional[str]
+    deposited_version: Optional[str]
+
+    # Relationship to Parent
+    dataset: Optional["Dataset"] = Relationship(back_populates="target_repos")
 
     def encrypt_config(self, cipher_suite):
-        self.config = cipher_suite.encrypt(self.config.encode()).decode()
+        self.configuration = cipher_suite.encrypt(self.configuration.encode()).decode()
 
     def decrypt_config(self, cipher_suite):
-        self.config = cipher_suite.decrypt(self.config.encode()).decode()
-    # Optional since some repo uses the same uername/password
-    # e.g. dataverse username is always API_KEY, SWH API uses the same username/password for every user.
-    # username: Optional[str]
-    # password: Optional[str]
+        self.configuration = cipher_suite.decrypt(self.configuration.encode()).decode()
 
 
-# Define the Files model
+class DataFileState(str, Enum):
+    REGISTERED = "REGISTERED"
+    PROCESSING = "PROCESSING"
+    COMPLETED = "COMPLETED"
+    GENERATED = "GENERATED"
+    UPDATED = "UPDATED"
+    UPLOADED = "UPLOADED"
+
+
+class AccessLevel(str, Enum):
+    PRIVATE = "PRIVATE"
+    PUBLIC = "PUBLIC"
+
+
 class DataFile(SQLModel, table=True):
-    """
-    Represents a data file associated with a dataset.
-
-    Attributes:
-        id (int): The primary key of the data file.
-        ds_id (str): The foreign key referencing the dataset.
-        name (str): The name of the data file.
-        path (Optional[str]): The path to the data file.
-        size (Optional[int]): The size of the data file.
-        mime_type (Optional[str]): The MIME type of the data file.
-        checksum_value (Optional[str]): The checksum value of the data file.
-        date_added (Optional[datetime]): The date the data file was added.
-        permissions (FilePermissions): The permissions of the data file. Defaults to PRIVATE.
-        state (DataFileWorkState): The state of the data file. Defaults to REGISTERED.
-    """
     __tablename__ = "data_file"
+
     id: int = Field(primary_key=True)
-    ds_id: int = Field(foreign_key="dataset.id")
+    dataset_id: str = Field(foreign_key="dataset.id", index=True)
     name: str = Field(index=True)
     path: Optional[str]
     size: Optional[int]
     mime_type: Optional[str]
-    checksum_value: Optional[str]
-    date_added: Optional[datetime]
-    permissions: FilePermissions = FilePermissions.PRIVATE
-    state: DataFileWorkState = DataFileWorkState.REGISTERED
+    checksum: Optional[str]
+    added_at: Optional[datetime]
+    access_level: AccessLevel = Field(default=AccessLevel.PRIVATE)
+    state: DataFileState = Field(default=DataFileState.REGISTERED)
+
+    # Relationship to Parent
+    dataset: Optional["Dataset"] = Relationship(back_populates="data_files")
+
 
 
 class DatabaseManager:
@@ -163,46 +172,72 @@ class DatabaseManager:
     """
     cipher_suite = None
 
-    def __init__(self, db_dialect: str, db_url: str, encryption_key: str):
+    def __init__(self, db_dialect: str, db_url: str, encryption_key: str, app_name: str = ""):
         """
-        Initializes the DatabaseManager with the specified database dialect, URL, and encryption key.
+        Initializes the DatabaseManager with the specified database dialect, URL, encryption key, and application name.
 
         Args:
             db_dialect (str): The database dialect (e.g., 'sqlite').
             db_url (str): The database URL.
             encryption_key (str): The encryption key used for data encryption.
+            app_name (str): The application name to differentiate databases.
         """
-        self.conn_url = f'{db_dialect}:{db_url}'
-        self.engine = create_engine(self.conn_url, pool_size=10)
-        # TODO: Remove db_file = self.conn_url.split("///")[1]
-        # TODO use self.engine
-        self.db_file = self.conn_url.split("///")[1]  # sqlite:////
-        self.cipher_suite = Fernet(base64.urlsafe_b64encode(encryption_key.encode()))
-    # def get_db(self):
-    #     database = self.session_local()
-    #     try:
-    #         yield database
-    #     finally:
-    #         database.close()
 
-    # def encrypt_data(self, data):
-    #     return self.cipher_suite.encrypt(data.encode()).decode()
-    #
-    # # Function to decrypt data
-    # def decrypt_data(self, data):
-    #     return  self.cipher_suite.decrypt(data.encode()).decode()
+        self.app_name = app_name
+        if app_name.strip() != "":
+            self.conn_url = f'{db_dialect}:{db_url}/acp-{app_name}.db'
+        else:
+            self.conn_url = f'{db_dialect}:{db_url}/acp.db'
+
+        db_path = os.path.dirname(self.conn_url.split("///")[1])
+
+        # Ensure the directory exists
+        if not os.path.exists(db_path):
+            os.makedirs(db_path)
+
+        self.engine = create_engine(self.conn_url, pool_size=10, echo=False)
+        # self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine, class_=AsyncSession)
+        self.cipher_suite = Fernet(base64.urlsafe_b64encode(encryption_key.encode()))
 
     def create_db_and_tables(self):
-        # checkfirst=True means if not exist create one, otherwise skip it.
-        # But it doesn't work in multiple uvicorn workers
+        # Check if the table exists, if not create it
         if not inspect(self.engine).has_table("Dataset"):
+            # Create tables here
+            logging.info(f"Creating dataset table of database '{self.app_name}'")
             SQLModel.metadata.create_all(self.engine, checkfirst=True)
         else:
-            logging.info('TABLES ALREADY CREATED')
+            print(f'TABLES ALREADY CREATED IN DATABASE: {self.app_name} which is located at {self.conn_url}')
+            logging.info(f'TABLES ALREADY CREATED IN DATABASE: {self.app_name} which is located at {self.conn_url}')
+
+    def create_initial_dataset_record(self, dataset_id: str, owner_id: str, title: Optional[str] = None) -> Dataset:
+        """
+        Create an initial dataset record.
+
+        Args:
+            dataset_id (str): The ID of the dataset.
+            owner_id (str): The ID of the owner of the dataset.
+            title (Optional[str]): The title of the dataset. Defaults to None.
+
+        Returns:
+            Dataset: The created dataset record.
+        """
+        dataset = Dataset(
+            id=dataset_id,
+            owner_id=owner_id,
+            title=title,
+            status=StateVersion.DRAFT,
+            submission_ready=False
+        )
+        dataset.encrypt_metadata_content(self.cipher_suite)
+        with Session(self.engine) as session:
+            session.add(dataset)
+            session.commit()
+            session.refresh(dataset)
+        return dataset
 
     def insert_dataset_and_target_repo(self, ds_record: Dataset, repo_records: List[TargetRepo]) -> Dataset:
-        # Encrypt the md field of the Dataset
-        ds_record.encrypt_md(self.cipher_suite)
+        # Encrypt the metadata_content field of the Dataset
+        ds_record.encrypt_metadata_content(self.cipher_suite)
 
         # Encrypt the config field of each TargetRepo
         for tr in repo_records:
@@ -219,17 +254,17 @@ class DatabaseManager:
             session.add(ds_record)
             session.commit()
             for tr in repo_records:
-                tr.ds_id = ds_record.id
+                tr.dataset_id = ds_record.id
                 session.add(tr)
             session.commit()
             session.refresh(ds_record)
         return ds_record
 
-    def insert_datafiles(self, ds_id, file_records: [DataFile]) -> None:
+    def insert_datafiles(self, dataset_id, file_records: [DataFile]) -> None:
         try:
             with Session(self.engine) as session:
                 for file_record in file_records:
-                    file_record.ds_id = ds_id
+                    file_record.dataset_id = dataset_id
                     session.add(file_record)
                     session.commit()
                     session.refresh(file_record)
@@ -238,11 +273,14 @@ class DatabaseManager:
             print(f"IntegrityError: {e.orig}")
             # Optionally, you can re-raise the exception or handle it as needed
             raise ValueError(f"------- IntegrityError: {e.orig}")
+        except Exception as e:
+            print(f"Exception: {e}")
+            raise ValueError(f"------- Exception: {e}")
 
 
-    def delete_datafile(self, dataset_id: str, filename: str) -> None:
+    def delete_datafile(self,dataset_id: str, filename: str) -> None:
         with Session(self.engine) as session:
-            file_record = session.exec(select(DataFile).where(DataFile.ds_id == dataset_id, DataFile.name == filename)).one_or_none()
+            file_record = session.exec(select(DataFile).where(DataFile.dataset_id == dataset_id, DataFile.name == filename)).one_or_none()
             if file_record:
                 session.delete(file_record)
                 session.commit()
@@ -253,103 +291,151 @@ class DatabaseManager:
             session.commit()
         return tabs
 
-    def delete_by_dataset_id(self, dataset_id) -> type(int):
+    def delete_by_dataset_id(self,dataset_id: str) -> type(int):
         with Session(self.engine) as session:
             ds = session.exec(select(Dataset).where(Dataset.id == dataset_id)).one_or_none()
             if ds:
                 # Delete DataFiles and TargetRepos in a single transaction
                 for model in [DataFile, TargetRepo]:
-                    session.exec(delete(model).where(model.ds_id == dataset_id))
+                    session.exec(delete(model).where(model.dataset_id == dataset_id))
 
                 # Delete Dataset
                 session.delete(session.exec(select(Dataset).where(Dataset.id == dataset_id)).one_or_none())
                 session.commit()
                 return 1
             return 0
-    #Unique: md_id, version, md_state_version
-    def find_dataset(self, dataset: Dataset) -> Dataset:
-        with Session(self.engine) as session:
-            query = select(Dataset).where(
-                and_(
-                    Dataset.md_id == dataset.md_id,
-                    Dataset.version == dataset.version,
-                    Dataset.md_state_version == dataset.md_state_version
-                )
-            )
-            return session.exec(query).first()
-
 
     def find_draft_dataset(self, dataset: Dataset) -> Dataset:
         with Session(self.engine) as session:
             query = select(Dataset).where(
                 and_(
-                    Dataset.md_id == dataset.md_id,
-                    Dataset.version == StateVersion.DRAFT,
-                    Dataset.md_state_version == StateVersion.DRAFT
+                    Dataset.id == dataset.id,
+                    Dataset.status == StateVersion.DRAFT
                 )
             )
             return session.exec(query).first()
 
-    def find_dataset_by_id(self, dataset_id: int) -> Dataset:
+    def find_dataset_by_id(self, dataset_id: str) -> Optional[Dataset]:
         with Session(self.engine) as session:
-            query = select(Dataset).where(Dataset.id == dataset_id)
-            dataset = session.exec(query).one_or_none()
+            statement = select(Dataset).where(Dataset.id == dataset_id).options(
+                selectinload(Dataset.target_repos),
+                selectinload(Dataset.data_files)
+            )
+            dataset = session.exec(statement).one_or_none()
+
             if dataset:
-                dataset.decrypt_md(self.cipher_suite)
+                # Ensure relationships are loaded
+                session.refresh(dataset)
+                for repo in dataset.target_repos:
+                    session.refresh(repo)
+
+                for files in dataset.data_files:
+                    session.refresh(files)
+
+                # Decrypt dataset metadata
+                dataset.decrypt_metadata_content(self.cipher_suite)
+
+                # Decrypt all target repo configs
+                for repo in dataset.target_repos:
+                    repo.decrypt_config(self.cipher_suite)
+
             return dataset
 
-    def find_dataset_id_by_md_id(self, md_id: str, state_version: StateVersion = StateVersion.DRAFT) -> Dataset:
+    def find_dataset_only_by_id(self, dataset_id: str) -> Optional[Dataset]:
         with Session(self.engine) as session:
-            dataset = session.exec(select(Dataset).where(Dataset.md_id == md_id
-                                                         and Dataset.md_state_version == state_version)).one_or_none()
+            statement = select(Dataset).where(Dataset.id == dataset_id)
+            dataset = session.exec(statement).one_or_none()
+
+            if dataset:
+                # Ensure relationships are loaded
+                session.refresh(dataset)
+                for repo in dataset.target_repos:
+                    session.refresh(repo)
+
+                for files in dataset.data_files:
+                    session.refresh(files)
+
+                # Decrypt dataset metadata
+                dataset.decrypt_metadata_content(self.cipher_suite)
+
+                # Decrypt all target repo configs
+                for repo in dataset.target_repos:
+                    repo.decrypt_config(self.cipher_suite)
 
             return dataset
-    def find_draft_dataset_id_by_md_id(self, md_id: str) -> Dataset:
-        with Session(self.engine) as session:
-            dataset_id = session.exec(select(Dataset.id).where(Dataset.md_id == md_id
-                                                               and Dataset.md_state_version == StateVersion.DRAFT
-                                                               and Dataset.version == StateVersion.DRAFT)).one_or_none()
-
-            return dataset_id
-
-    def find_target_repo(self, dataset_id: str, target_name: str) -> TargetRepo:
+    def find_target_repo(self,dataset_id: str, target_name: str) -> TargetRepo:
         with Session(self.engine) as session:
             target_repo = session.exec(
-                select(TargetRepo).where(TargetRepo.ds_id == dataset_id, TargetRepo.name == target_name)).one_or_none()
+                select(TargetRepo).where(TargetRepo.dataset_id == dataset_id, TargetRepo.name == target_name)).one_or_none()
             if target_repo:
                 target_repo.decrypt_config(self.cipher_suite)
             return target_repo
 
-    def find_dataset_and_targets_by_md_id_and_state_version(self, metadata_id: str, md_state_version: StateVersion = StateVersion.DRAFT) -> Asset:
+    def find_dataset_and_targets(self, dataset_id: str, exclude_target=False) -> Asset:
         with Session(self.engine) as session:
-            dataset = session.exec(select(Dataset).where(Dataset.md_id == metadata_id and Dataset.md_state_version == md_state_version)).one_or_none()
+            dataset = session.exec(select(Dataset).where(Dataset.id == dataset_id)).one_or_none()
             if dataset:
-                dataset.decrypt_md(self.cipher_suite)
+                dataset.decrypt_metadata_content(self.cipher_suite)
                 asset = Asset()
-                asset.md_id = dataset.md_id
-                asset.md_state_version = dataset.md_state_version
+                asset.dataset_id = dataset.id
+                # asset.release_version = dataset.release_version
                 asset.title = dataset.title
-                asset.md = dataset.md
-                asset.created_date = dataset.created_date
-                asset.saved_date = dataset.saved_date
-                asset.submitted_date = dataset.submitted_date
-                asset.version = dataset.version
+                asset.md = dataset.metadata_content
+                asset.created_at = dataset.created_at
+                asset.saved_at = dataset.saved_at
+                asset.submitted_at = dataset.submitted_at
+                # asset.release_version = dataset.release_version
+                # asset.version = dataset.version
+                # Fetch TargetRepo objects associated with the Dataset and order them
+
+                if not exclude_target:
+                    targets_repo = session.exec(
+                        select(TargetRepo).where(TargetRepo.dataset_id == dataset.id).order_by(TargetRepo.id)).all()
+                    for target_repo in targets_repo:
+                        target_repo.decrypt_config(self.cipher_suite)
+                        target = TargetApp()
+                        target.repo_name = target_repo.name
+                        target.display_name = target_repo.display_name
+                        target.deposit_status = target_repo.deposit_status
+                        target.deposited_at = target_repo.deposited_at
+                        target.deposit_duration = target_repo.deposit_duration
+                        if target_repo.target_service_response is not None and target_repo.target_service_response != '':
+                            target.output_response = json.loads(target_repo.target_service_response)
+                        asset.targets.append(target)
+                return asset
+            return Asset()
+
+
+    def find_dataset_and_targets_by_dataset_id(self,dataset_id: str) -> Asset:
+        with Session(self.engine) as session:
+            dataset = session.exec(select(Dataset).where(Dataset.id == dataset_id)).one_or_none()
+            if dataset:
+                dataset.decrypt_metadata_content(self.cipher_suite)
+                asset = Asset()
+                asset.dataset_id = dataset.id
+                asset.status = dataset.status
+                asset.title = dataset.title
+                asset.md = dataset.metadata_content
+                asset.created_at = dataset.created_at
+                asset.saved_at = dataset.saved_at
+                asset.submitted_at = dataset.submitted_at
                 # Fetch TargetRepo objects associated with the Dataset and order them
                 targets_repo = session.exec(
-                    select(TargetRepo).where(TargetRepo.ds_id == dataset.id).order_by(TargetRepo.id)).all()
+                    select(TargetRepo).where(TargetRepo.dataset_id == dataset.id).order_by(TargetRepo.id)).all()
                 for target_repo in targets_repo:
                     target_repo.decrypt_config(self.cipher_suite)
                     target = TargetApp()
                     target.repo_name = target_repo.name
                     target.display_name = target_repo.display_name
                     target.deposit_status = target_repo.deposit_status
-                    target.deposit_time = target_repo.deposit_time
-                    target.duration = target_repo.duration
-                    if target_repo.target_output is not None and target_repo.target_output != '':
-                        target.output_response = json.loads(target_repo.target_output)
+                    target.deposited_at = target_repo.deposited_at
+                    target.deposit_duration = target_repo.deposit_duration
+                    if target_repo.target_service_response is not None and target_repo.target_service_response != '':
+                        target.target_service_response = json.loads(target_repo.target_service_response)
                     asset.targets.append(target)
                 return asset
             return Asset()
+
     # TODO: CHECK THIS
     def find_dataset_ids_by_owner(self, owner_id: str) -> [TargetRepo]:
         with Session(self.engine) as session:
@@ -376,7 +462,7 @@ class DatabaseManager:
             statement = (
                 select(Dataset)
                 .where(Dataset.owner_id == owner_id)
-                .order_by(Dataset.md_id)
+                .order_by(Dataset.id)
                 .limit(page_size)
                 .offset((page - 1) * page_size)
             )
@@ -384,11 +470,11 @@ class DatabaseManager:
             result = results.all()
         return result
 
-    def find_target_repos_by_dataset_id(self, dataset_id: int) -> [TargetRepo]:
+    def find_target_repos_by_dataset_id(self,dataset_id: str) -> [TargetRepo]:
         with Session(self.engine) as session:
             statement = (
                 select(TargetRepo)
-                .join(Dataset, TargetRepo.ds_id == Dataset.id)
+                .join(Dataset, TargetRepo.dataset_id == Dataset.id)
                 .where(Dataset.id == dataset_id)
                 .order_by(TargetRepo.id)
             )
@@ -398,47 +484,47 @@ class DatabaseManager:
                 target_repo.decrypt_config(self.cipher_suite)
             return target_repos
 
-    def find_uploaded_files(self, dataset_id: str) -> [DataFile]:
+    def find_uploaded_files(self,dataset_id: str) -> [DataFile]:
         with Session(self.engine) as session:
-            statement = select(DataFile).where(DataFile.ds_id == dataset_id, DataFile.state == DataFileWorkState.UPLOADED)
+            statement = select(DataFile).where(DataFile.dataset_id == dataset_id, DataFile.state == DataFileState.UPLOADED)
             results = session.exec(statement)
             result = results.all()
         return result
 
-    def find_file_by_name(self, dataset_id: str, file_name: str) -> [DataFile]:
+    def find_file_by_name(self,dataset_id: str, file_name: str) -> [DataFile]:
         with Session(self.engine) as session:
-            statement = select(DataFile).where(DataFile.ds_id == dataset_id, DataFile.name == file_name)
+            statement = select(DataFile).where(DataFile.dataset_id == dataset_id, DataFile.name == file_name)
             results = session.exec(statement)
             result = results.one_or_none()
         return result
 
-    def find_files(self, dataset_id: int) -> [DataFile]:
+    def find_files(self,dataset_id: str) -> [DataFile]:
         with Session(self.engine) as session:
-            statement = select(DataFile).where(DataFile.ds_id == dataset_id)
+            statement = select(DataFile).where(DataFile.dataset_id == dataset_id)
             results = session.exec(statement)
             result = results.all()
         return result
 
-    def find_registered_files(self, dataset_id: str) -> [DataFile]:
+    def find_registered_files(self,dataset_id: str) -> [DataFile]:
         with Session(self.engine) as session:
-            statement = select(DataFile).where(DataFile.ds_id == dataset_id, DataFile.state == DataFileWorkState.REGISTERED)
+            statement = select(DataFile).where(DataFile.dataset_id == dataset_id, DataFile.state == DataFileState.REGISTERED)
             results = session.exec(statement)
             result = results.all()
         return result
 
-    def find_non_generated_files(self, dataset_id: str) -> [DataFile]:
+    def find_non_generated_files(self,dataset_id: str) -> [DataFile]:
         with Session(self.engine) as session:
-            statement = select(DataFile).where(DataFile.ds_id == dataset_id, DataFile.state != DataFileWorkState.REGISTERED)
+            statement = select(DataFile).where(DataFile.dataset_id == dataset_id, DataFile.state != DataFileState.REGISTERED)
             results = session.exec(statement)
             result = results.all()
         return result
 
     # TODO: REFACTOR - CHANGE THE NAME
-    def execute_l(self, dataset_id: str) -> Any:
+    def execute_l(self,dataset_id: str) -> Any:
         rst = []
         with Session(self.engine) as session:
-            statement = select(DataFile.name).where(DataFile.ds_id == dataset_id,
-                                                    DataFile.state == DataFileWorkState.UPLOADED)
+            statement = select(DataFile.name).where(DataFile.dataset_id == dataset_id,
+                                                    DataFile.state == DataFileState.UPLOADED)
             results = session.exec(statement).all()
             rst = results
         return rst
@@ -449,123 +535,123 @@ class DatabaseManager:
             results = session.exec(statement)
             ds_record = results.one_or_none()
             if ds_record:
-                ds_record.md = dataset.md
+                ds_record.metadata_content = dataset.metadata_content
+                ds_record.metadata_type = dataset.metadata_type
                 ds_record.title = dataset.title
-                ds_record.md_state_version = dataset.md_state_version
-                ds_record.saved_date =  datetime.now(timezone.utc)
-                ds_record.state = dataset.state
-                ds_record.encrypt_md(self.cipher_suite)
+                ds_record.status = dataset.status
+                ds_record.saved_at =  datetime.now(timezone.utc)
+                ds_record.submission_ready = dataset.submission_ready
+                ds_record.encrypt_metadata_content(self.cipher_suite)
                 session.add(ds_record)
                 session.commit()
                 session.refresh(ds_record)
         return ds_record
 
-    def update_dataset_md(self, id: str, md: str) -> type(None):
-        with Session(self.engine) as session:
-            statement = select(Dataset).where(Dataset.md_id == id)
-            results = session.exec(statement)
-            ds_record = results.one_or_none()
-            if ds_record:
-                ds_record.md = md
-                ds_record.encrypt_md(self.cipher_suite)
-                session.add(ds_record)
-                session.commit()
-                session.refresh(ds_record)
-
-    def set_dataset_ready_for_ingest(self, dataset_id: str, status: DatasetWorkState= DatasetWorkState.READY) -> type(None):
+    def set_dataset_ready_for_ingest(self,dataset_id: str, submission_ready: bool = False) -> type(None):
         with Session(self.engine) as session:
             statement = select(Dataset).where(Dataset.id == dataset_id)
             results = session.exec(statement)
-            md_record = results.one_or_none()
-            if md_record:
-                # md_record.release_version = ReleaseVersion.PUBLISH
-                md_record.state = status
-                session.add(md_record)
+            metadata_content_record = results.one_or_none()
+            if metadata_content_record:
+                # metadata_content_record.release_version = ReleaseVersion.PUBLISH
+                metadata_content_record.submission_ready = submission_ready
+                session.add(metadata_content_record)
                 session.commit()
-                session.refresh(md_record)
-
+                session.refresh(metadata_content_record)
 
     def update_target_repo_deposit_status(self, target_repo: TargetRepo) -> type(None):
         with Session(self.engine) as session:
-            statement = select(TargetRepo).where(TargetRepo.ds_id == target_repo.ds_id,
+            statement = select(TargetRepo).where(TargetRepo.dataset_id == target_repo.dataset_id,
                                                  TargetRepo.name == target_repo.name)
             results = session.exec(statement)
             target_repo_record = results.one_or_none()
             if target_repo:
                 target_repo_record.deposit_status = target_repo.deposit_status
-                target_repo_record.target_output = target_repo.target_output
-                target_repo_record.deposit_time = datetime.now(timezone.utc)
-                target_repo_record.duration = target_repo.duration
+                target_repo_record.target_service_response = target_repo.target_service_response
+                target_repo_record.deposited_at = datetime.now(timezone.utc)
+                target_repo_record.deposit_duration = target_repo.deposit_duration
                 target_repo_record.encrypt_config(self.cipher_suite)
                 session.add(target_repo_record)
                 session.commit()
                 session.refresh(target_repo_record)
 
 
-    def submitted_now(self, dataset_id: int) -> type(None):
+
+    def submitted_now(self,dataset_id: str) -> type(None):
         with Session(self.engine) as session:
             statement = select(Dataset).where(Dataset.id == dataset_id)
             results = session.exec(statement)
-            md_record = results.one_or_none()
-            if md_record:
-                md_record.submitted_date =  datetime.now(timezone.utc)
-                md_record.saved_date =  datetime.now(timezone.utc)
-                session.add(md_record)
+            metadata_content_record = results.one_or_none()
+            if metadata_content_record:
+                metadata_content_record.submitted_at =  datetime.now(timezone.utc)
+                metadata_content_record.saved_at =  datetime.now(timezone.utc)
+                session.add(metadata_content_record)
                 session.commit()
-                session.refresh(md_record)
+                session.refresh(metadata_content_record)
 
     def update_file(self, df: DataFile) -> type(None):
         with Session(self.engine) as session:
-            statement = select(DataFile).where(DataFile.ds_id == df.ds_id, DataFile.name == df.name)
+            statement = select(DataFile).where(DataFile.dataset_id == df.dataset_id, DataFile.name == df.name)
             results = session.exec(statement)
             f_record = results.one_or_none()
             if f_record:
-                f_record.date_added =  datetime.now(timezone.utc)
+                f_record.added_at =  datetime.now(timezone.utc)
                 f_record.path = df.path
                 f_record.mime_type = df.mime_type
                 f_record.size = df.size
-                f_record.checksum_value = df.checksum_value
+                f_record.checksum = df.checksum
+                print(f"df.state: {df.state}")
                 f_record.state = df.state
                 session.add(f_record)
                 session.commit()
                 session.refresh(f_record)
 
-    def update_file_permission(self, dataset_id: str, filename: str, permission: FilePermissions) -> type(None):
+    def update_file_access_level(self, dataset_id: str, filename: str, access_level: AccessLevel) -> type(None):
         with Session(self.engine) as session:
-            statement = select(DataFile).where(DataFile.ds_id == dataset_id, DataFile.name == filename)
+            statement = select(DataFile).where(DataFile.dataset_id == dataset_id, DataFile.name == filename)
             results = session.exec(statement)
             f_record = results.one_or_none()
             if f_record:
-                f_record.permissions = permission
+                f_record.access_level = access_level
                 session.add(f_record)
                 session.commit()
                 session.refresh(f_record)
 
-    def replace_targets_record(self, ds_id: str, target_repo_records: [TargetRepo]) -> type(None):
+    def replace_targets_record(self, dataset_id: str, target_repo_records: [TargetRepo]) -> type(None):
         with Session(self.engine) as session:
-            statement = select(TargetRepo).where(TargetRepo.ds_id == ds_id)
+            statement = select(TargetRepo).where(TargetRepo.dataset_id == dataset_id)
             results = session.exec(statement)
             trs = results.fetchall()
             for tr in trs:
                 session.delete(tr)
             session.commit()
             for tr in target_repo_records:
-                tr.ds_id = ds_id
+                tr.dataset_id = dataset_id
                 tr.encrypt_config(self.cipher_suite)
                 session.add(tr)
             session.commit()
 
 
-    def is_dataset_ready(self, ds_id: str) -> bool:
+    def is_dataset_ready(self,dataset_id: str) -> bool:
         with Session(self.engine) as session:
             dataset_id_rec = session.exec(
-                select(Dataset.id).where((Dataset.id == ds_id) & (Dataset.state == DatasetWorkState.READY) &
-                                            (Dataset.md_state_version == StateVersion.SUBMIT))).one_or_none()
+                select(Dataset.id).where((Dataset.id == dataset_id) & Dataset.submission_ready)).one_or_none()
             return dataset_id_rec is not None
 
-    def are_files_uploaded(self, dataset_id: str) -> bool:
+    def are_files_uploaded(self,dataset_id: str) -> bool:
         with Session(self.engine) as session:
-            results = session.exec(select(DataFile).where(DataFile.ds_id == dataset_id,
-                                                          DataFile.state == DataFileWorkState.REGISTERED)).all()
+            results = session.exec(select(DataFile).where(DataFile.dataset_id == dataset_id,
+                                                          DataFile.state == DataFileState.REGISTERED)).all()
 
         return len(results) == 0
+
+    def update_dataset_status(self, dataset_id: str, state: StateVersion) -> type(None):
+        with Session(self.engine) as session:
+            statement = select(Dataset).where(Dataset.id == dataset_id)
+            results = session.exec(statement)
+            ds_record = results.one_or_none()
+            if ds_record:
+                ds_record.status = state
+                session.add(ds_record)
+                session.commit()
+                session.refresh(ds_record)

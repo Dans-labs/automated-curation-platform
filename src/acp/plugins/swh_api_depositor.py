@@ -35,8 +35,8 @@ class SwhApiDepositor(Bridge):
         """
         logging.info(f'DEPOSIT to {self.target.repo_name}')
         target_response = TargetResponse()
-        target_swh = jmespath.search("metadata.repository_url.value",#TODO: Move to acp config assistant as a json element
-                                     json.loads(self.metadata_rec.md))
+        target_swh = jmespath.search("metadata.repository_url.value",  #TODO: Move to acp config assistant as a json element
+                                     json.loads(self.dataset_rec.metadata_content))
         tdm = TargetDataModel(response=target_response)
         headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {app_settings.SWH_ACCESS_TOKEN}'}
         logging.info(f'self.target.target_url: {self.target.target_url}')

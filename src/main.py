@@ -40,8 +40,8 @@ from starlette import status
 from starlette.middleware.cors import CORSMiddleware
 
 from src.acp import protected, public, protected_admin
-from src.acp.commons import app_settings, data, db_manager, inspect_bridge_plugin, \
-    get_version, get_name, project_details
+from src.acp.commons import app_settings, data, inspect_bridge_plugin, \
+    get_version, get_name, project_details, get_db_manager, retrieve_apps_list
 from src.acp.tus_files import upload_files
 
 
@@ -62,11 +62,16 @@ async def lifespan(application: FastAPI):
 
     """
     print('start up')
-    if not os.path.exists(app_settings.DB_URL):
-        logging.info('Creating database')
+    apps = retrieve_apps_list()
+
+    if not apps:
+        raise RuntimeError("No apps found. Cancelling startup.")
+
+    for app in apps:
+        db_manager = get_db_manager(app)
         db_manager.create_db_and_tables()
-    else:
-        logging.info('Database already exists')
+        data.update({app: db_manager})
+    # db_manager.create_db_and_tables()
     iterate_saved_bridge_plugin_dir()
     print(f'Available bridge classes: {sorted(list(data.keys()))}')
     print(emoji.emojize(':thumbs_up:'))

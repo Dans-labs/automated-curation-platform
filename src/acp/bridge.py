@@ -5,8 +5,8 @@ import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
-from src.acp.commons import app_settings, db_manager
-from src.acp.dbz import TargetRepo, DepositStatus, DatabaseManager, Dataset, DataFile
+from src.acp.commons import app_settings
+from src.acp.dbz import TargetRepo, DepositStatus, Dataset, DataFile, DatabaseManager
 from src.acp.models.assistant_datamodel import Target
 from src.acp.models.bridge_output_model import TargetDataModel
 
@@ -20,7 +20,7 @@ class Bridge(ABC):
         dataset_id (str): Identifier for the dataset.
         target (Target): Information about the target repository.
         db_manager (DatabaseManager): Database manager for interacting with the data store.
-        metadata_rec (Dataset): Record representing the dataset metadata.
+        dataset_rec (Dataset): Record representing the dataset metadata.
         app_name (str): Name of the application associated with the dataset.
         data_file_rec (DataFile): Record representing the data file associated with the dataset.
         dataset_dir (str): Directory path for the dataset.
@@ -35,12 +35,12 @@ class Bridge(ABC):
         This class is expected to be subclassed with a concrete implementation of the `deposit` method.
     """
 
-    dataset_id: int
+    dataset_id: str
     target: Target
-    db_manager: DatabaseManager = field(init=False)
-    metadata_rec: Dataset = field(init=False)
-    app_name: str = field(init=False)
-    data_file_rec: DataFile = field(init=False)
+    db_manager: DatabaseManager
+    dataset_rec: Dataset = field(init=False)
+    app_name: str
+    # data_file_rec: DataFile = field(init=False)
     dataset_dir: str = field(init=False)
 
     def __post_init__(self):
@@ -54,10 +54,10 @@ class Bridge(ABC):
         Note:
             This method is automatically called by the dataclasses plugin after the object is created.
         """
-        object.__setattr__(self, 'db_manager', db_manager)
-        object.__setattr__(self, 'metadata_rec', self.db_manager.find_dataset_by_id(self.dataset_id))
-        object.__setattr__(self, 'app_name', self.metadata_rec.app_name)
-        object.__setattr__(self, 'data_file_rec', self.db_manager.find_files(self.dataset_id))
+        object.__setattr__(self, 'db_manager', self.db_manager)
+        object.__setattr__(self, 'dataset_rec', self.db_manager.find_dataset_by_id(self.dataset_id))
+        # object.__setattr__(self, 'app_name', self.metadata_rec.app_name)
+        # object.__setattr__(self, 'data_file_rec', self.db_manager.find_files(self.dataset_id))
         object.__setattr__(self, 'dataset_dir', os.path.join(app_settings.DATA_TMP_BASE_DIR,
                                                              self.app_name, str(self.dataset_id)))
         self.save_state()
@@ -85,11 +85,12 @@ class Bridge(ABC):
         deposit_status = output_data_model.deposit_status if output_data_model else DepositStatus.PROGRESS
         duration = output_data_model.response.duration if output_data_model else 0.0
         output = output_data_model.model_dump_json() if output_data_model else ''
+        deposited_version = output_data_model.deposited_version if output_data_model else ''
         if output_data_model:
             logging.info(f'Save state for dataset_id: {self.dataset_id}. Target: {self.target.repo_name}')
-        db_manager.update_target_repo_deposit_status(TargetRepo(ds_id=self.dataset_id, name=self.target.repo_name,
-                                                                deposit_status=deposit_status, target_output=output,
-                                                                duration=duration))
+        self.db_manager.update_target_repo_deposit_status(TargetRepo(dataset_id=self.dataset_id, name=self.target.repo_name,
+                                                                deposit_status=deposit_status.upper(), target_service_response=output,
+                                                                deposit_duration=duration, deposited_version=deposited_version))
 
     def deposit_files(self):
         pass

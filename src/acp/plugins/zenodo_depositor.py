@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from starlette import status
 
 from src.acp.bridge import Bridge
-from src.acp.commons import transform, handle_deposit_exceptions, db_manager
+from src.acp.commons import transform, handle_deposit_exceptions
 from src.acp.dbz import DepositStatus
 from src.acp.models.bridge_output_model import TargetDataModel, TargetResponse, ResponseContentType, IdentifierItem
 
@@ -39,7 +39,7 @@ class ZenodoApiDepositor(Bridge):
             return TargetDataModel(deposited_metadata="Error occurs: status code: 500", deposit_status=DepositStatus.ERROR)
         zenodo_id = zenodo_resp.get("id")
         str_zenodo_dataset_metadata = transform(self.target.metadata.transformed_metadata[0].transformer_url,
-                                                self.metadata_rec.md)
+                                                self.dataset_rec.md)
 
         url = f'{self.target.target_url}/{zenodo_id}?{self.target.username}={self.target.password}'
         logging.info(f"Send to {url}")
@@ -98,7 +98,7 @@ class ZenodoApiDepositor(Bridge):
         """
         logging.info(f'Ingesting files to {bucket_url}')
         params = {'access_token': self.target.password, 'access_right': 'restricted'}
-        for file in db_manager.find_non_generated_files(dataset_id=self.dataset_id):
+        for file in self.db_manager.find_non_generated_files(dataset_id=self.dataset_id):
             file_path = f"{file.path}"
             logging.info(f'Ingesting file {file_path}')
             with open(file_path, "rb") as fp:

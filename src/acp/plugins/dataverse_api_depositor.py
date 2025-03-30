@@ -16,12 +16,11 @@ from starlette import status
 from src.acp.bridge import Bridge, TargetDataModel
 from src.acp.commons import (
     app_settings,
-    db_manager,
     transform,
     handle_deposit_exceptions, dmz_dataverse_headers, zip_a_zipfile_with_progress, transform_xml,
-    processed_metadata_handler,
+    processed_metadata_handler
 )
-from src.acp.dbz import StateVersion, DataFile, DepositStatus, FilePermissions, DataFileWorkState, MetadataType
+from src.acp.dbz import StateVersion, DataFile, DepositStatus, MetadataType, AccessLevel, DataFileState
 from src.acp.models.bridge_output_model import IdentifierItem, IdentifierProtocol, TargetResponse, ResponseContentType
 
 
@@ -56,16 +55,17 @@ class DataverseIngester(Bridge):
         Returns:
             TargetDataModel: The result of the ingestion process.
         """
-        target_repo = TargetResponse(url=self.target.target_url)
-        tdm = TargetDataModel(response=target_repo)
 
-        if self.metadata_rec.md_type == MetadataType.JSON:
-            md_json = json.loads(self.metadata_rec.md)
+        target_repo_response = TargetResponse(url=self.target.target_url)
+        tdm = TargetDataModel(response=target_repo_response)
+
+        if self.dataset_rec.metadata_type == MetadataType.JSON:
+            md_json = json.loads(self.dataset_rec.metadata_content)
 
             if self.target.input:
-                input_from_prev_target = db_manager.find_target_repo(self.dataset_id, self.target.input.from_target_name)
+                input_from_prev_target = self.db_manager.find_target_repo(self.dataset_id, self.target.input.from_target_name)
                 md_json[self.target.input.from_target_name] = json.loads(input_from_prev_target.target_output)['response']['identifiers'][0]['value']
-                db_manager.update_dataset_md(self.dataset_id, json.dumps(md_json))
+                self.db_manager.update_dataset_md(self.dataset_id, json.dumps(md_json))
 
             if self.target.metadata:
                 files_metadata = jmespath.search('"file-metadata"[*]', md_json)
@@ -74,9 +74,9 @@ class DataverseIngester(Bridge):
                     # Add generated files to the metadata
                     generated_files = self.__create_generated_files()
                     for gf in generated_files:
-                        files_metadata.append({"name": gf.name, "mimetype": gf.mime_type, "private": gf.permissions == FilePermissions.PRIVATE})
+                        files_metadata.append({"name": gf.name, "mimetype": gf.mime_type, "private": gf.access_level == AccessLevel.PRIVATE})
                     if generated_files:
-                        db_manager.insert_datafiles(self.dataset_id, generated_files)
+                        self.db_manager.insert_datafiles(self.dataset_id, generated_files)
 
                     if files_metadata:
                         md_json["file-metadata"] = files_metadata
@@ -88,26 +88,30 @@ class DataverseIngester(Bridge):
                     #     pm.dir = f'{self.dataset_dir}/{pm.dir}' if pm.dir else self.dataset_dir
                     #     processed_metadata_handler(pm, md_json)
 
-                for file in db_manager.find_non_generated_files(dataset_id=self.dataset_id):
+                for file in self.db_manager.find_non_generated_files(dataset_id=self.dataset_id):
                     escaped_file_name = file.name.replace('"', '\\"')
                     f_json = jmespath.search(f'[?name == `{escaped_file_name}`]', files_metadata)
                     f_json[0]["mimetype"] = file.mime_type
 
             str_updated_metadata = json.dumps(md_json)
+            self.dataset_rec.metadata_content = str_updated_metadata
+
+            self.db_manager.update_metadata(self.dataset_rec)
         else:
-            str_updated_metadata = self.metadata_rec.md
+            str_updated_metadata = self.dataset_rec.metadata_content
 
         logging.info(f"str_updated_metadata_json: {str_updated_metadata}")
 
         # The metadata will be transformed if name is "dataset-metadata.json" and the transformed metadata is available.
         try:
             str_dv_metadata = self.__transform_metadata_to_dataverse_json(str_updated_metadata,
-                                                                          app_settings.get("DV_METADATA", "dataset-metadata.json"), self.metadata_rec.md_type)
+                                                                          app_settings.get("DV_METADATA", "dataset-metadata.json"),
+                                                                          self.dataset_rec.metadata_type)
         except ValueError as e:
             tdm.deposited_metadata = str(e)
             tdm.deposit_status = DepositStatus.ERROR
             return tdm
-        if self.metadata_rec.md_type == MetadataType.JSON:
+        if self.dataset_rec.metadata_type == MetadataType.JSON:
             tdm.payload = json.loads(str_dv_metadata)
             # TOOD tdm.payload for other than json metadata
 
@@ -117,7 +121,18 @@ class DataverseIngester(Bridge):
         if self.target.target_url_params:
             self.target.target_url += "?" + self.target.target_url_params.replace("$PID", md_json["datasetVersion"]["datasetPersistentId"])
 
-        dv_response = requests.post(self.target.target_url, headers=dmz_dataverse_headers('API_KEY', self.target.password), data=str_dv_metadata)
+
+        # Ingest the metadata into Dataverse
+        # The metadata is ingested first, and then the files are ingested.
+
+        # Check whether the dataset is new or not
+        target_repo = self.dataset_rec.target_repos
+
+        # dv_response = requests.get(f'{self.target.base_url}/api/datasets/:persistentId/?persistentId={md_json["datasetVersion"]["datasetPersistentId"]}',
+        #                            headers=dmz_dataverse_headers('API_KEY', self.target.password))
+        #This is a new dataset
+        dv_response = requests.post(self.target.target_url,
+                                    headers=dmz_dataverse_headers('API_KEY', self.target.password), data=str_dv_metadata)
         logging.info(f"dv_response.status_code: {dv_response.status_code} dv_response.text: {dv_response.text}")
 
         identifier_items = []
@@ -127,32 +142,30 @@ class DataverseIngester(Bridge):
             dv_response_json = dv_response.json()
             logging.info(f"Data ingest successfully! {json.dumps(dv_response_json)}")
             pid = dv_response_json["data"]["persistentId"]
-            self.__set_repo_identifiers(identifier_items, pid, target_repo)
+            self.__set_repo_identifiers(identifier_items, pid, target_repo_response)
+            tdm.deposit_status = DepositStatus.FINISH
+            tdm.deposited_version = StateVersion.DRAFT
 
             if self.target.metadata and self.target.metadata.transformed_metadata:
                 try:
-                    if self.metadata_rec.md_type == MetadataType.JSON:
+                    if self.dataset_rec.metadata_type == MetadataType.JSON:
                         self.__ingest_files(pid, str_updated_metadata)
-                    tdm.deposit_status = DepositStatus.FINISH
-                    tdm.deposited_metadata = "The dataset and its file is successfully ingested"
+
                     logging.info('The dataset and its file is successfully ingested"')
-                    target_repo.status_code = status.HTTP_200_OK
+                    target_repo_response.status_code = status.HTTP_200_OK
                     if self.target.initial_release_version == StateVersion.PUBLISHED:
                         logging.info('Publish the dataset')
-                        target_repo.status_code = self.__publish_dataset(pid)
-                        tdm.deposited_metadata = "The dataset and its files successfully published" if target_repo.status_code == status.HTTP_200_OK else "The dataset is unsuccessfully published"
+                        target_repo_response.status_code = self.__publish_dataset(pid)
+                        tdm.deposited_version = StateVersion.PUBLISHED
                 except ValueError as e:
                     tdm.deposit_status = DepositStatus.ERROR
                     tdm.deposited_metadata = str(e)
                     tdm.deposited_metadata = "The dataset and its file is unsuccessfully ingested"
-                    #Rollback: Delete the dataset
+                    #TODO: Rollback: Delete the dataset
                     dv_id = dv_response_json["data"]["id"]
                     delete_response = requests.delete(f"{self.target.base_url}/api/datasets/{dv_id}/versions/:draft", headers=dmz_dataverse_headers('API_KEY', self.target.password))
                     logging.info(f"delete_response.status_code: {delete_response.status_code} delete_response.text: {delete_response.text}")
                     return tdm
-
-            tdm.deposit_status = DepositStatus.FINISH
-
 
         else:
             logging.error(f"Ingest failed with status code {dv_response.status_code}:")
@@ -165,9 +178,9 @@ class DataverseIngester(Bridge):
 
         current_time = datetime.now(timezone.utc).isoformat()
         tdm.deposit_time = current_time
-        target_repo.content = dv_response.json()
-        target_repo.content_type = ResponseContentType.JSON
-        target_repo.status_code = dv_response.status_code
+        target_repo_response.content = dv_response.json()
+        target_repo_response.content_type = ResponseContentType.JSON
+        target_repo_response.status_code = dv_response.status_code
 
         dv_resp_deposited = requests.get(f'{self.target.base_url}/api/datasets/:persistentId/?persistentId={pid}',
                                    headers=dmz_dataverse_headers('API_KEY', self.target.password), data=str_dv_metadata)
@@ -177,7 +190,7 @@ class DataverseIngester(Bridge):
             logging.info(f"Error: {dv_resp_deposited.text} status code: {dv_resp_deposited.status_code}")
             pass #TODO: Handle this case
 
-        tdm.response = target_repo
+        tdm.response = target_repo_response
         return tdm
 
     def __set_repo_identifiers(self, identifier_items, pid, target_repo):
@@ -188,7 +201,7 @@ class DataverseIngester(Bridge):
         target_repo.identifiers = identifier_items
 
     # When the transformation is done successfully, the transformed metadata is returned otherwise an error message is returned.
-    def __transform_metadata_to_dataverse_json(self, str_updated_metadata_json, json_data_name: str, md_type: MetadataType = MetadataType.JSON) -> str:
+    def __transform_metadata_to_dataverse_json(self, str_updated_metadata_json, json_data_name: str, metadata_type: MetadataType = MetadataType.JSON) -> str:
         if self.target.metadata and self.target.metadata.transformed_metadata:
             transformer = [metadata for metadata in self.target.metadata.transformed_metadata if
                            metadata.name == json_data_name]
@@ -197,12 +210,12 @@ class DataverseIngester(Bridge):
                 #Skip transformation
                 return str_updated_metadata_json
                 # raise ValueError(f"Error: Transformer '{json_data_name}' not found or more than one transformer")
-            if md_type == MetadataType.XML:
+            if metadata_type == MetadataType.XML:
                 str_dv_metadata = transform_xml(
                     transformer_url=transformer[0].transformer_url,
                     str_tobe_transformed=str_updated_metadata_json
                 )
-            elif md_type == MetadataType.JSON:
+            elif metadata_type == MetadataType.JSON:
                 str_dv_metadata = transform(
                     transformer_url=transformer[0].transformer_url,
                     str_tobe_transformed=str_updated_metadata_json
@@ -246,17 +259,17 @@ class DataverseIngester(Bridge):
             if tm.generate_file:
                 gf_path = os.path.join(self.dataset_dir, tm.name)
                 content = transform(tm.transformer_url,
-                                    self.metadata_rec.md) if tm.transformer_url else self.metadata_rec.md
+                                    self.dataset_rec.metadata_content) if tm.transformer_url else self.dataset_rec.metadata_content
                 with open(gf_path, "wt") as f:
                     f.write(content)
                 gf_mimetype = mimetypes.guess_type(gf_path)[0]
-                permissions = FilePermissions.PRIVATE if tm.restricted else FilePermissions.PUBLIC
+                access_levels = AccessLevel.PRIVATE if tm.restricted else AccessLevel.PUBLIC
                 generated_files.append(DataFile(
-                    ds_id=self.dataset_id, name=tm.name, path=gf_path,
+                    dataset_id=self.dataset_id, name=tm.name, path=gf_path,
                     size=os.path.getsize(gf_path), mime_type=gf_mimetype,
-                    checksum_value=get_checksum(gf_path, algorithm="MD5"),
-                    date_added=datetime.utcnow(), permissions=permissions,
-                    state=DataFileWorkState.GENERATED))
+                    checksum=get_checksum(gf_path, algorithm="MD5"),
+                    added_at=datetime.now(timezone.utc), access_level=access_levels,
+                    state=DataFileState.GENERATED))
         return generated_files
 
     def __ingest_files(self, pid: str, str_updated_metadata_json: str) -> int:
@@ -264,7 +277,7 @@ class DataverseIngester(Bridge):
 
         str_dv_file = self.__transform_metadata_to_dataverse_json(str_updated_metadata_json, app_settings.get("DV_FILES", "dataset-files.json"))
 
-        for file in db_manager.find_non_generated_files(dataset_id=self.dataset_id):
+        for file in self.db_manager.find_non_generated_files(dataset_id=self.dataset_id):
             logging.info(f'Ingesting file {file.name}. Size: {file.size} Path: {file.path}')
             jsonData = json.loads(str_dv_file).get(file.name)
             if not jsonData:

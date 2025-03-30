@@ -28,7 +28,7 @@ class DataverseDatasetDelete(Bridge):
         Returns:
         BridgeOutputDataModel: The output model containing the response from the Dataverse repository and the status of the deletion process.
         """
-        md_json = json.loads(self.metadata_rec.md)
+        md_json = json.loads(self.dataset_rec.metadata_content)
         try:
             dv_pid = md_json["datasetVersion"]["datasetPersistentId"]
         except KeyError:

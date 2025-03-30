@@ -8,7 +8,7 @@ import shutil
 from fastapi import APIRouter, Request, HTTPException
 from starlette.responses import FileResponse
 
-from src.acp.commons import app_settings, data, db_manager
+from src.acp.commons import app_settings, data, get_app_name
 
 # Import custom plugins and classes
 
@@ -59,8 +59,8 @@ async def register_plugin(name: str, bridge_file: Request, overwrite: bool | Non
     return {"status": "OK", "bridge-plugin-name": name}
 
 #
-@router.delete("/inbox/{md_id}", include_in_schema=False)
-def delete_inbox(md_id: str):
+@router.delete("/inbox/{dataset_id}", include_in_schema=False)
+async def delete_inbox(dataset_id: str, req: Request):
     """
     Endpoint to delete an inbox dataset.
 
@@ -72,7 +72,10 @@ def delete_inbox(md_id: str):
     Returns:
         dict: A dictionary containing the status of the deletion and the number of rows deleted.
     """
-    dataset_id = db_manager.find_draft_dataset_id_by_md_id(md_id)
+    app_name = await get_app_name(req)
+    db_manager = data[app_name]
+
+    dataset_id = db_manager.find_draft_dataset_id_by_md_id(dataset_id)
     num_rows_deleted = db_manager.delete_by_dataset_id(dataset_id)
     return {"Deleted": "OK", "num-row-deleted": num_rows_deleted}
 
@@ -173,7 +176,7 @@ def get_db():
 
 
 @router.delete("/db-delete-all", include_in_schema=False)
-def delete_all_recs():
+async def delete_all_recs(req: Request):
     """
     Endpoint to delete all records from the database.
 
@@ -187,4 +190,25 @@ def delete_all_recs():
         Logs the action of deleting all records.
     """
     logging.info('Deleting all')
+    app_name = await get_app_name(req)
+    db_manager = data[app_name]
     return db_manager.delete_all()
+
+
+
+# Endpoint to retrieve application app_settings
+@router.get("/app_settings-reload", include_in_schema=False)
+async def get_settings():
+    """
+    Endpoint to retrieve and reload application app_settings.
+
+    This endpoint retrieves the current application app_settings, reloads them, and returns the updated app_settings.
+
+    Returns:
+        dict: A dictionary containing the updated application app_settings.
+    """
+    logging.info(f"Getting app_settings Before Load: {app_settings.as_dict()}")
+    logging.info("Reload app_settings")
+    app_settings.reload()
+    logging.info(f"Getting app_settings After Load: {app_settings.as_dict()}")
+    return app_settings.as_dict()

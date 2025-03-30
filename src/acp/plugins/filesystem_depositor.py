@@ -29,7 +29,7 @@ class FileSystem(Bridge):
         BridgeOutputDataModel: The output model for the filesystem deposit process.
         """
         logging.info(f'Depositing to File: {self.target.repo_name}')
-        metadata = json.loads(self.metadata_rec.md)
+        metadata = json.loads(self.dataset_rec.md)
 
         parsed_url = urllib.parse.urlparse(self.target.target_url)
 

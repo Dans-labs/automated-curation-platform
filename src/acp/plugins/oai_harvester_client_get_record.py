@@ -32,7 +32,7 @@ class OaiHarvesterClientGetRecord(Bridge):
         BridgeOutputDataModel: The output model containing the response from the OAI-PMH repository and the status of the harvesting process.
         """
         logging.info(f'Harvesting of {self.target.repo_name}')
-        oai_metadata = json.loads(self.metadata_rec.md)
+        oai_metadata = json.loads(self.dataset_rec.md)
 
         sickle = Sickle(self.target.target_url)
         query_dict = dict(pair.split('=') for pair in self.target.target_url_params.split('&'))

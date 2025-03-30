@@ -10,7 +10,7 @@ import sword2.deposit_receipt as dr
 from requests.auth import HTTPBasicAuth
 
 from src.acp.bridge import Bridge
-from src.acp.commons import app_settings, DepositStatus, transform, db_manager
+from src.acp.commons import app_settings, DepositStatus, transform
 from src.acp.models.bridge_output_model import TargetDataModel, TargetResponse
 
 
@@ -35,8 +35,8 @@ class SwhSwordDepositor(Bridge):
         """
         output_model = TargetDataModel()
         # Create SWORD payload
-        swh_form_md = json.loads(self.metadata_rec.md)
-        dv_target = db_manager.find_target_repo(self.dataset_id, self.target.input.from_target_name)
+        swh_form_md = json.loads(self.dataset_rec.md)
+        dv_target = self.db_manager.find_target_repo(self.dataset_id, self.target.input.from_target_name)
         if dv_target:
             swh_form_md.update({"doi": json.loads(dv_target.target_output)['response']['identifiers'][0]['value']})
         logging.info(f"SwhSwordDepositor- swh_form_md - after update (doi): {json.dumps(swh_form_md)}")

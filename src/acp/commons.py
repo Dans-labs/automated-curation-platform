@@ -1,6 +1,7 @@
 import ast
 import importlib
 import inspect
+import json
 import logging
 import os
 import re
@@ -24,8 +25,9 @@ from jsoncomparison import Compare
 from requests_toolbelt.multipart.encoder import MultipartEncoder, MultipartEncoderMonitor
 from starlette import status
 
-from src.acp.dbz import DatabaseManager, DepositStatus
-from src.acp.models.assistant_datamodel import ProcessedMetadata
+from src.acp.dbz import DatabaseManager, DepositStatus, StateVersion
+from src.acp.models.app_model import Asset, TargetApp
+from src.acp.models.assistant_datamodel import ProcessedMetadata, RepoAssistantDataModel
 from src.acp.models.bridge_output_model import TargetDataModel, TargetResponse
 
 base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -37,7 +39,12 @@ data = {}
 
 project_details = a_commons.get_project_details(os.getenv("BASE_DIR"), ['name', 'version', 'description', 'title'])
 
-db_manager = DatabaseManager(db_dialect=app_settings.DB_DIALECT, db_url=app_settings.DB_URL, encryption_key=app_settings.DB_ENCRYPTION_KEY)
+db_manager = DatabaseManager(db_dialect=app_settings.DB_DIALECT, db_url=app_settings.DB_URL
+                             , encryption_key=app_settings.DB_ENCRYPTION_KEY)
+
+def get_db_manager(app_name: str):
+    return DatabaseManager(db_dialect=app_settings.DB_DIALECT, db_url=app_settings.DB_URL
+                             , encryption_key=app_settings.DB_ENCRYPTION_KEY, app_name= app_name)
 
 transformer_headers = {
     'Content-Type': 'application/json',
@@ -70,47 +77,6 @@ def get_version():
 def get_name():
     return project_details['name']
 
-# def setup_logger():
-#     """
-#     This function sets up the logger for the application.
-#
-#     It iterates over the list of loggers specified in the app_settings, and for each logger, it:
-#     - Gets or creates a logger with the specified name.
-#     - Creates a formatter with the specified format.
-#     - Creates a file handler that writes to the specified log file in append mode, and sets its formatter.
-#     - Creates a stream handler (which writes to stdout by default) and sets its formatter.
-#     - Creates a timed rotating file handler that rotates the log file every 8 hours and keeps the last 10 log files, and adds it to the logger.
-#     - Sets the log level of the logger.
-#     - Adds the file handler and the stream handler to the logger.
-#     - Logs a startup message at the debug level, which includes the current time and the Python version.
-#
-#     The logger app_settings (name, format, log file, and log level) are read from the `LOGGERS` setting in the application's configuration.
-#
-#     The startup message is logged using the `logger` function defined elsewhere in this plugin.
-#     """
-#     now = datetime.utcnow()
-#     for log in app_settings.LOGGERS:
-#         log_setup = logging.getLogger(log.get('name'))
-#         formatter = logging.Formatter(log.get('log_format'))
-#         file_handler = logging.FileHandler(log.get('log_file'), mode='a')
-#         file_handler.setFormatter(formatter)
-#         stream_handler = logging.StreamHandler()
-#         stream_handler.setFormatter(formatter)
-#         rotating_handler = TimedRotatingFileHandler(log.get('log_file'), when="H", interval=8, backupCount=10)
-#         log_setup.addHandler(rotating_handler)
-#         log_setup.setLevel(log.get('log_level'))
-#         log_setup.addHandler(file_handler)
-#         log_setup.addHandler(stream_handler)
-#         logger(f"Start {log.get('name')} at {now} Pyton version: {platform.python_version()}",
-#                'debug', log.get('name'))
-
-
-# def logger(msg, level, logfile):
-#     log = logging.getLogger(logfile)
-#     if level == 'info': log.info(msg)
-#     if level == 'warning': log.warning(msg)
-#     if level == 'error': log.error(msg)
-#     if level == 'debug': log.debug(msg)
 
 
 def get_class(kls) -> Any:
@@ -211,55 +177,6 @@ def transform_xml(transformer_url: str, str_tobe_transformed: str) -> str:
     str: The transformed string if the request is successful.
     """
     return transform(transformer_url, str_tobe_transformed, transformer_headers_xml)
-
-# def transform(transformer_url: str, input: str) -> str:
-#     logger(transformer_url: {transformer_url}', LOGGER_LEVEL_DEBUG, LOG_NAME_PS)
-#     logger(f'input: {input}', LOGGER_LEVEL_DEBUG, LOG_NAME_PS)
-#     try:
-#         transformer_response = requests.post(transformer_url, headers=transformer_headers, data=input)
-#         if transformer_response.status_code == 200:
-#             transformed_metadata = transformer_response.json()
-#             str_transformed_metadata = transformed_metadata.get('result')
-#             logger(f'Transformer result: {str_transformed_metadata}', LOGGER_LEVEL_DEBUG, LOG_NAME_PS)
-#             return str_transformed_metadata
-#         logger(transformer_response.status_code: {transformer_response.status_code}', 'error', LOG_NAME_PS)
-#         raise ValueError(f"Error - Transformer response status code: {transformer_response.status_code}")
-#     except ConnectionError as ce:
-#         logger(f'Errors during transformer: {ce.with_traceback(ce.__traceback__)}', LOGGER_LEVEL_DEBUG, LOG_NAME_PS)
-#         raise ValueError(f"Error - {ce.with_traceback(ce.__traceback__)}")
-#     except Exception as ex:
-#         raise ValueError(f"Error - {ex.with_traceback(ex.__traceback__)}")
-
-
-# def handle_deposit_exceptions(bridge_output_model: BridgeOutputModel) -> Callable[
-#     [Any], Callable[[tuple[Any, ...], dict[str, Any]], BridgeOutputModel | Any]]:
-#     def decorator(func):
-#         @wraps(func)
-#         def wrapper(*args, **kwargs):
-#             try:
-#                 print("start")
-#                 print(f'kwargs: {kwargs}')
-#                 print(f'args: {args}')
-#                 # Call the original function
-#                 rv = func(*args, **kwargs)
-#                 print("end")
-#                 return rv
-#             except Exception as ex:
-#                 # Handle the exception and provide the default response
-#                 logger(f'Errors in {func.__name__}: {ex.with_traceback(ex.__traceback__)}',
-#                        LOGGER_LEVEL_DEBUG, LOG_NAME_PS)
-#                 bridge_output_model.deposit_status = DepositStatus.ERROR
-#                 target_response = TargetResponse()
-#                 target_response.duration=10100
-#                 target_response.error="hello error"
-#                 bridge_output_model.message = "this is bridge message"
-#                 target_response.message = "TARGET MESSAGE"
-#                 bridge_output_model.response = target_response
-#                 return bridge_output_model
-#
-#         return wrapper
-#
-#     return decorator
 
 
 
@@ -377,11 +294,6 @@ def inspect_bridge_plugin(py_file_path: str):
     return results
 
 
-# class ACPeException(Exception):
-#     def __init__(self, bom: BridgeOutputDataModel, message: str):
-#         self.bom = bom
-#         self.message = message
-#         super().__init__(self.message)
 
 def send_mail(subject: str, text: str, recipients: list[str] = None):
     """
@@ -418,10 +330,10 @@ def send_mail(subject: str, text: str, recipients: list[str] = None):
                     message['To'] = recipient_email
                     server.sendmail(sender_email, recipient_email, message.as_string())
                     logging.debug(f"Email sent successfully to {recipient_email}")
-            logging.debug(f"Email sent successfully to {recipient_email}")
+            logging.debug(f"Email sent successfully to {recipients}")
         except Exception as e:
             print(f"Error: {e}")
-            logging.error(f"Unsuccessful sent email to {recipient_email}")
+            logging.error(f"Unsuccessful sent email to {recipients}")
             raise ValueError(f"Error: {e}")
     else:
         logging.info("Sending email is disabled.")
@@ -731,3 +643,106 @@ def processed_metadata_handler(steps, rec):
 
     return rec
 
+
+@handle_ps_exceptions
+def retrieve_targets_configuration(assistant_config_name: str) -> str:
+    """
+    Retrieve the configuration for the specified assistant.
+
+    This function retrieves the configuration for the given assistant by making a request
+    to the assistant configuration URL.
+
+    Args:
+        assistant_config_name (str): The name of the assistant configuration to retrieve.
+
+    Returns:
+        str: The JSON response containing the assistant configuration.
+
+    Raises:
+        HTTPException: If the configuration URL returns a status code other than 200.
+    """
+    repo_url = f'{app_settings.ASSISTANT_CONFIG_URL}/name/{assistant_config_name}'
+    logging.info(f'Retrieve targets configuration from {repo_url}')
+    rsp = requests.get(repo_url, headers=assistant_repo_headers)
+    if rsp.status_code != 200:
+        logging.error(f'ERROR: {repo_url} not found, status code: {rsp.status_code}')
+        raise HTTPException(status_code=404, detail=f"{repo_url} not found")
+    return rsp.json()
+
+@handle_ps_exceptions
+def retrieve_apps_list() -> str:
+    """
+    Retrieve the configuration for the specified assistant.
+
+    This function retrieves the configuration for the given assistant by making a request
+    to the assistant configuration URL.
+
+    Args:
+        assistant_config_name (str): The name of the assistant configuration to retrieve.
+
+    Returns:
+        str: The JSON response containing the assistant configuration.
+
+    Raises:
+        HTTPException: If the configuration URL returns a status code other than 200.
+    """
+    repo_url = f'{app_settings.ASSISTANT_CONFIG_URL}/list-apps'
+    logging.info(f'Retrieve list-apps from {repo_url}')
+    rsp = requests.get(repo_url, headers=assistant_repo_headers)
+    if rsp.status_code != 200:
+        logging.error(f'ERROR: {repo_url} not found, status code: {rsp.status_code}')
+        raise HTTPException(status_code=404, detail=f"{repo_url} not found")
+    return rsp.json()
+
+
+async def get_app_name(req):
+    assistant_name = req.headers.get('assistant-config-name')
+    if assistant_name is None:
+        raise HTTPException(status_code=400, detail="assistant-config-name")
+
+    repo_config = retrieve_targets_configuration(assistant_name)
+    repo_assistant = RepoAssistantDataModel.model_validate_json(repo_config)
+    return repo_assistant.app_name
+
+
+async def create_asset(dataset, db_manager, target_creds):
+    asset = Asset()
+    asset.dataset_id = dataset.id
+    asset.title = dataset.title
+    asset.created_at = dataset.created_at.strftime('%Y-%m-%d %H:%M:%S')
+    asset.saved_at = dataset.saved_at.strftime('%Y-%m-%d %H:%M:%S')
+    asset.submitted_at = dataset.submitted_at.strftime('%Y-%m-%d %H:%M:%S') if dataset.submitted_at else ''
+    asset.status = dataset.status
+
+    # Find target repositories by dataset ID
+    targets_repo = db_manager.find_target_repos_by_dataset_id(dataset.id)
+    # Process target repositories if the dataset is not in DRAFT release version
+    if dataset.status is not StateVersion.DRAFT:
+        for target_repo in targets_repo:
+            target = TargetApp()
+            target.repo_name = target_repo.name
+            target.display_name = target_repo.display_name
+            target.deposit_status = target_repo.deposit_status.name.lower()
+            target.deposited_at = target_repo.deposited_at.strftime(
+                '%Y-%m-%d %H:%M:%S') if target_repo.deposited_at else ''
+            target.deposit_duration = str(target_repo.deposit_duration)
+
+            # Parse the target repository output as JSON if available
+            rsp = json.loads(target_repo.target_service_response) if target_repo.target_service_response else {}
+            if rsp:
+                idents = rsp['response']['identifiers']
+                target.output_response = {"response": {"identifiers": idents}}
+
+                # Fetch diff for Dataverse if URL contains "dataset.xhtml"
+                if idents:
+                    url = rsp['response']['identifiers'][0]['url']
+                    if url.find("dataset.xhtml") > 0:
+                        logging.info(f'fetching diff for {target.repo_name}')
+                        target.diff = await fetch_dv_json(rsp, target, target_creds, url)
+                else:
+                    target.output_response = {}
+            else:
+                target.output_response = {}
+
+            asset.targets.append(target)
+    return asset
