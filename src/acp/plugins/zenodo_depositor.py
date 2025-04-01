@@ -98,7 +98,7 @@ class ZenodoApiDepositor(Bridge):
         """
         logging.info(f'Ingesting files to {bucket_url}')
         params = {'access_token': self.target.password, 'access_right': 'restricted'}
-        for file in self.db_manager.find_non_generated_files(dataset_id=self.dataset_id):
+        for file in self.db_manager.find_non_registered_files(dataset_id=self.dataset_id):
             file_path = f"{file.path}"
             logging.info(f'Ingesting file {file_path}')
             with open(file_path, "rb") as fp:

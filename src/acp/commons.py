@@ -12,7 +12,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from functools import wraps
 from tempfile import NamedTemporaryFile
-from typing import Any, Callable
+from typing import Any, Callable, dataclass_transform
 
 import boto3
 import psutil
@@ -25,7 +25,7 @@ from jsoncomparison import Compare
 from requests_toolbelt.multipart.encoder import MultipartEncoder, MultipartEncoderMonitor
 from starlette import status
 
-from src.acp.dbz import DatabaseManager, DepositStatus, StateVersion
+from src.acp.dbz import DatabaseManager, DepositStatus, StateVersion, DatasetStatus
 from src.acp.models.app_model import Asset, TargetApp
 from src.acp.models.assistant_datamodel import ProcessedMetadata, RepoAssistantDataModel
 from src.acp.models.bridge_output_model import TargetDataModel, TargetResponse
@@ -712,7 +712,10 @@ async def create_asset(dataset, db_manager, target_creds):
     asset.created_at = dataset.created_at.strftime('%Y-%m-%d %H:%M:%S')
     asset.saved_at = dataset.saved_at.strftime('%Y-%m-%d %H:%M:%S')
     asset.submitted_at = dataset.submitted_at.strftime('%Y-%m-%d %H:%M:%S') if dataset.submitted_at else ''
-    asset.status = dataset.status
+    if dataset.status == DatasetStatus.DRAFT_RESUBMIT:
+        asset.status = DatasetStatus.RESUBMIT
+    else:
+        asset.status = dataset.status
 
     # Find target repositories by dataset ID
     targets_repo = db_manager.find_target_repos_by_dataset_id(dataset.id)
@@ -746,3 +749,23 @@ async def create_asset(dataset, db_manager, target_creds):
 
             asset.targets.append(target)
     return asset
+
+
+def validate_json(str_dv_metadata):
+        try:
+            json.loads(str_dv_metadata)
+        except json.JSONDecodeError as e:
+            logging.error(f"Error: {e}")
+            str_dv_metadata = re.sub(r'[\x00-\x1F\x7F]', '', str_dv_metadata)
+            try:
+                json.loads(str_dv_metadata)
+            except json.JSONDecodeError as e:
+                logging.error(f"Error: {e}")
+                return None
+            except Exception as e:
+                logging.error(f"Error: {e}")
+                return None
+        except Exception as e:
+            logging.error(f"Error: {e}")
+            return None
+        return str_dv_metadata

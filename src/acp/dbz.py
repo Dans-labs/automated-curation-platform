@@ -29,6 +29,7 @@ class StateVersion(StrEnum):
     RESUBMIT = 'RESUBMIT'
     RESUBMITTED = 'RESUBMITTED'
     FAILED = 'FAILED'
+    DRAFT_RESUBMIT =  "DRAFT-RESUBMIT"
 
 class MetadataType(StrEnum):
     JSON = 'application/json'
@@ -52,6 +53,7 @@ class DatasetStatus(str, Enum):
     SUBMITTED = "SUBMITTED"
     RESUBMIT = "RESUBMIT"
     RESUBMITTED = "RESUBMITTED"
+    DRAFT_RESUBMIT = "DRAFT-RESUBMIT"
 
 
 
@@ -91,7 +93,6 @@ class DepositStatus(str, Enum):
     IN_PROGRESS = "IN_PROGRESS"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
-    INITIAL = "INITIAL"
     PROGRESS = "PROGRESS"
     FINISH = "FINISH"
     REJECTED = "REJECTED"
@@ -101,7 +102,6 @@ class DepositStatus(str, Enum):
     FINALIZING = "FINALIZING"
     SUBMITTED = "SUBMITTED"
     PUBLISHED = "PUBLISHED"
-    UNDEFINED = "UNDEFINED"
     DEPOSITED = "DEPOSITED"
 
 
@@ -135,8 +135,10 @@ class DataFileState(str, Enum):
     PROCESSING = "PROCESSING"
     COMPLETED = "COMPLETED"
     GENERATED = "GENERATED"
+    GENERATED_INGESTED = "GENERATED-INGESTED"
     UPDATED = "UPDATED"
     UPLOADED = "UPLOADED"
+    UPLOADED_INGESTED = "UPLOADED-INGESTED"
 
 
 class AccessLevel(str, Enum):
@@ -512,7 +514,7 @@ class DatabaseManager:
             result = results.all()
         return result
 
-    def find_non_generated_files(self,dataset_id: str) -> [DataFile]:
+    def find_non_registered_files(self, dataset_id: str) -> [DataFile]:
         with Session(self.engine) as session:
             statement = select(DataFile).where(DataFile.dataset_id == dataset_id, DataFile.state != DataFileState.REGISTERED)
             results = session.exec(statement)
@@ -567,10 +569,11 @@ class DatabaseManager:
             target_repo_record = results.one_or_none()
             if target_repo:
                 target_repo_record.deposit_status = target_repo.deposit_status
-                target_repo_record.target_service_response = target_repo.target_service_response
+                if target_repo.target_service_response:
+                    target_repo_record.target_service_response = target_repo.target_service_response
                 target_repo_record.deposited_at = datetime.now(timezone.utc)
                 target_repo_record.deposit_duration = target_repo.deposit_duration
-                target_repo_record.encrypt_config(self.cipher_suite)
+                # target_repo_record.encrypt_config(self.cipher_suite)
                 session.add(target_repo_record)
                 session.commit()
                 session.refresh(target_repo_record)
@@ -600,7 +603,6 @@ class DatabaseManager:
                 f_record.mime_type = df.mime_type
                 f_record.size = df.size
                 f_record.checksum = df.checksum
-                print(f"df.state: {df.state}")
                 f_record.state = df.state
                 session.add(f_record)
                 session.commit()
@@ -655,3 +657,11 @@ class DatabaseManager:
                 session.add(ds_record)
                 session.commit()
                 session.refresh(ds_record)
+
+    def delete_generated_files(self,dataset_id: str) -> type(None):
+        with Session(self.engine) as session:
+            statement = select(DataFile).where(DataFile.dataset_id == dataset_id, DataFile.state == DataFileState.GENERATED)
+            results = session.exec(statement)
+            for file_record in results.all():
+                session.delete(file_record)
+            session.commit()

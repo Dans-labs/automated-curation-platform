@@ -60,6 +60,7 @@ class Bridge(ABC):
         # object.__setattr__(self, 'data_file_rec', self.db_manager.find_files(self.dataset_id))
         object.__setattr__(self, 'dataset_dir', os.path.join(app_settings.DATA_TMP_BASE_DIR,
                                                              self.app_name, str(self.dataset_id)))
+
         self.save_state()
 
     @classmethod
@@ -84,7 +85,7 @@ class Bridge(ABC):
 
         deposit_status = output_data_model.deposit_status if output_data_model else DepositStatus.PROGRESS
         duration = output_data_model.response.duration if output_data_model else 0.0
-        output = output_data_model.model_dump_json() if output_data_model else ''
+        output = output_data_model.model_dump_json() if output_data_model else None
         deposited_version = output_data_model.deposited_version if output_data_model else ''
         if output_data_model:
             logging.info(f'Save state for dataset_id: {self.dataset_id}. Target: {self.target.repo_name}')

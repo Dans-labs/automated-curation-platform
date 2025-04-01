@@ -132,18 +132,10 @@ async def process_inbox(status, request):
 
     else:
         logging.info(f'Dataset already exist: {dataset_id}')
-        dataset = db_manager.find_dataset_only_by_id(dataset_id)
+        dataset = db_manager.find_dataset_only_by_id(dataset_id)#TODO: Check if resubmit and the dataset is not found: error!
 
-    if status == StateVersion.DRAFT and dataset.status == StateVersion.SUBMITTED:
-        dataset_db_status = StateVersion.RESUBMIT
-        db_manager.set_dataset_ready_for_ingest(dataset.id, False)
-    elif status in [StateVersion.SUBMIT, StateVersion.RESUBMIT]:
-        dataset_db_status = status
-    else:
-        dataset_db_status = dataset.status
-
-    # if status == StateVersion.DRAFT:
-    #     db_manager.set_dataset_ready_for_ingest(dataset.id, False)
+    dataset_submission_ready = status in [StateVersion.SUBMIT, StateVersion.RESUBMIT]
+    dataset_status = status if status in [StateVersion.DRAFT_RESUBMIT, StateVersion.SUBMIT, StateVersion.RESUBMIT] else dataset.status
 
     if idh.metadata_type == MetadataType.JSON:
         logging.info('Processing json metadata')
@@ -152,14 +144,14 @@ async def process_inbox(status, request):
         logging.info('Processing xml metadata')
         metadata = idh.metadata_content
 
-    db_record_metadata = Dataset(id=dataset_id, title=idh.title, owner_id=idh.owner_id, status=dataset_db_status,
-                                 metadata_content=metadata,
+    db_record_metadata = Dataset(id=dataset_id, title=idh.title, owner_id=idh.owner_id, status=dataset_status,
+                                 metadata_content=metadata, submission_ready = dataset_submission_ready,
                                  metadata_type=MetadataType(idh.metadata_type))
 
 
     dataset = db_manager.update_dataset(db_record_metadata)
 
-    if dataset.status not in [StateVersion.SUBMITTED, StateVersion.RESUBMIT]:
+    if status == StateVersion.DRAFT or status == StateVersion.SUBMIT:
         db_recs_target_repo = process_target_repos(repo_assistant, idh.target_creds)
         db_manager.replace_targets_record(dataset.id, db_recs_target_repo)
 
@@ -168,11 +160,12 @@ async def process_inbox(status, request):
     if not os.path.exists(dataset_dir):
         os.makedirs(dataset_dir)
 
-    registered_files, dataset_state = process_registered_files(db_manager, dataset.id, idh, dataset_dir)
-    if dataset_state == DatasetWorkState.READY:
+    registered_files, file_submission_ready = process_registered_files(db_manager, dataset.id, idh, dataset_dir)
+    if dataset_submission_ready and file_submission_ready:
         db_manager.set_dataset_ready_for_ingest(dataset.id, True)
+
     logging.info(f'Registered files: {registered_files}')
-    logging.info(f'Dataset state: {dataset_state}')
+    logging.info(f'Dataset: {dataset_submission_ready} File state: {file_submission_ready}')
     process_db_records_registered_files(db_manager, dataset.id, registered_files)
 
 
@@ -287,7 +280,7 @@ def process_db_records_registered_files(db_manager, dataset_id, registered_files
 
 @handle_ps_exceptions
 def process_registered_files(db_manager, dataset_id, idh, tmp_dir):
-    dataset_state = DatasetWorkState.READY
+    file_submission_ready = True
     registered_files = []
     if idh.metadata_type == MetadataType.JSON:
         logging.info('Processing json metadata')
@@ -341,9 +334,9 @@ def process_registered_files(db_manager, dataset_id, idh, tmp_dir):
         # Update file permission
         already_uploaded_files = db_manager.find_uploaded_files(dataset_id)
         logging.info(f'Number of already_uploaded_files: {len(already_uploaded_files)}')
-        dataset_state = DatasetWorkState.READY if not files_name_to_be_added else DatasetWorkState.NOT_READY
+        file_submission_ready = True if not files_name_to_be_added else False
 
-    return registered_files, dataset_state
+    return registered_files, file_submission_ready
 
 @handle_ps_exceptions
 def process_target_repos(repo_assistant, target_creds) -> [TargetRepo]:
