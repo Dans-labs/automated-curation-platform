@@ -45,7 +45,7 @@ async def progress_state(owner_id: str, req: Request, page: int = 1, page_size: 
     tc_header = req.headers.get('targets-credentials')
     assistant_name = req.headers.get('assistant-config-name')
     if not tc_header or not assistant_name:
-            raise HTTPException(status_code=400, detail="Targets credentials are missing")
+            raise HTTPException(status_code=400, detail="'assistant-config-name' is missing")
 
     # Attempt to parse the 'targets-credentials' header as JSON
     try:
@@ -84,7 +84,7 @@ async def find_dataset(dataset_id: str, req: Request):
     logging.info(f'find_metadata_by_metadata_id - metadata_id: {dataset_id}')
     assistant_name = req.headers.get('assistant-config-name')
     if assistant_name is None:
-        raise HTTPException(status_code=400, detail="assistant-config-name")
+        raise HTTPException(status_code=400, detail="'assistant-config-name' is missing")
 
     # Attempt to parse the 'targets-credentials' header as JSON
 

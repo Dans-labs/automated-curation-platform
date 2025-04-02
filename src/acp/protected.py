@@ -674,7 +674,7 @@ def delete_inbox(dataset_id: str, req: Request):
     """
     assistant_name = req.headers.get('assistant-config-name')
     if assistant_name:
-        raise HTTPException(status_code=400, detail="assistant-config-name are missing")
+        raise HTTPException(status_code=400, detail="assistant-config-name is missing")
 
     repo_config = retrieve_targets_configuration(assistant_name)
     repo_assistant = RepoAssistantDataModel.model_validate_json(repo_config)
@@ -723,7 +723,7 @@ def get_md(dataset_id: str, req: Request):
     logging.info(f'find_metadata_by_metadata_id - metadata_id: {dataset_id}')
     assistant_name = req.headers.get('assistant-config-name')
     if assistant_name is None:
-        raise HTTPException(status_code=400, detail="assistant-config-name")
+        raise HTTPException(status_code=400, detail="'assistant-config-name' is missing")
 
     # Attempt to parse the 'targets-credentials' header as JSON
 
@@ -756,7 +756,7 @@ async def dataset_diff(dataset_id: str, req: Request):
     tc_header = req.headers.get('targets-credentials')
     assistant_name = req.headers.get('assistant-config-name')
     if not tc_header or not assistant_name:
-        raise HTTPException(status_code=400, detail="Targets credentials are missing and/or assistant-config-name are missing")
+        raise HTTPException(status_code=400, detail="Targets credentials are missing and/or assistant-config-name is missing")
 
     # Attempt to parse the 'targets-credentials' header as JSON
 
