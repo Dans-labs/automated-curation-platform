@@ -472,14 +472,22 @@ class DatabaseManager:
             result = results.all()
         return result
 
-    def find_target_repos_by_dataset_id(self,dataset_id: str) -> [TargetRepo]:
+    def find_target_repos_by_dataset_id(self,dataset_id: str, is_submitted: bool = False) -> [TargetRepo]:
         with Session(self.engine) as session:
-            statement = (
-                select(TargetRepo)
-                .join(Dataset, TargetRepo.dataset_id == Dataset.id)
-                .where(Dataset.id == dataset_id)
-                .order_by(TargetRepo.id)
-            )
+            if is_submitted:
+                statement = (
+                    select(TargetRepo)
+                    .join(Dataset, TargetRepo.dataset_id == Dataset.id)
+                    .where(Dataset.id == dataset_id and Dataset.status == StateVersion.SUBMITTED)
+                    .order_by(TargetRepo.id)
+                )
+            else:
+                statement = (
+                    select(TargetRepo)
+                    .join(Dataset, TargetRepo.dataset_id == Dataset.id)
+                    .where(Dataset.id == dataset_id)
+                    .order_by(TargetRepo.id)
+                )
             results = session.exec(statement)
             target_repos = results.all()
             for target_repo in target_repos:

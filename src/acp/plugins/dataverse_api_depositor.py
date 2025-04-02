@@ -123,9 +123,8 @@ class DataverseIngester(Bridge):
         # Check whether the dataset is new or not
 
         if self.dataset_rec.status == StateVersion.RESUBMIT:
-            dv_response, pid = self.__handle_resubmit_dataset(dv_headers, str_dv_metadata, str_updated_metadata, tdm)
-
-
+            dv_response, pid = self.__handle_resubmit_dataset(dv_headers, str_dv_metadata, str_updated_metadata,
+                                                              target_repo_response, tdm)
         else:
             #This is a new dataset
             dv_response, pid = self.__handle_submit_dataset(dv_headers, str_dv_metadata, str_updated_metadata,
@@ -170,11 +169,15 @@ class DataverseIngester(Bridge):
             tdm.deposited_version = StateVersion.PUBLISHED
         return dv_response, pid
 
-    def __handle_resubmit_dataset(self, dv_headers, str_dv_metadata, str_updated_metadata, tdm):
+    def __handle_resubmit_dataset(self, dv_headers, str_dv_metadata, str_updated_metadata, target_repo_response, tdm):
         target_repo_rec = self.db_manager.find_target_repo(dataset_id=self.dataset_id,
                                                            target_name=self.target.repo_name)
         tsr = json.loads(target_repo_rec.target_service_response)
         pid = tsr["response"]["identifiers"][0]["value"]
+        identifier_items = []
+        self.__set_repo_identifiers(identifier_items, pid, target_repo_response)
+        tdm.deposit_status = DepositStatus.FINISH
+        tdm.deposited_version = StateVersion.DRAFT
         md_json = json.loads(str_dv_metadata)
         md_block_only = md_json["datasetVersion"]["metadataBlocks"]
         term_of_access = md_json["datasetVersion"]["termsOfAccess"]

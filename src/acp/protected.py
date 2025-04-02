@@ -20,10 +20,10 @@ from fastapi import APIRouter, Request, HTTPException
 from src.acp.commons import (app_settings, data,
                              get_class, handle_ps_exceptions, \
                              send_mail, delete_symlink_and_target, retrieve_targets_configuration, get_app_name,
-                             create_asset)
+                             create_asset, fetch_dv_json)
 from src.acp.dbz import TargetRepo, DataFile, Dataset, StateVersion, DepositStatus, \
     DatasetWorkState, MetadataType, AccessLevel, DataFileState
-from src.acp.models.app_model import ResponseDataModel, InboxDatasetDataModel
+from src.acp.models.app_model import ResponseDataModel, InboxDatasetDataModel, TargetApp
 # Import custom plugins and classes
 from src.acp.models.assistant_datamodel import RepoAssistantDataModel, Target
 from src.acp.models.bridge_output_model import TargetsCredentialsModel
@@ -143,6 +143,30 @@ async def process_inbox(status, request):
     else:
         logging.info('Processing xml metadata')
         metadata = idh.metadata_content
+
+    if status in [StateVersion.DRAFT_RESUBMIT, StateVersion.RESUBMIT]:
+        # Check if the dataset has changed on the server
+        target_repos = db_manager.find_target_repos_by_dataset_id(dataset_id=dataset.id, is_submitted=True)
+
+        for target_repo in target_repos:
+            rsp = json.loads(target_repo.target_service_response) if target_repo.target_service_response else {}
+            if rsp:
+                idents = rsp['response']['identifiers']
+                target = TargetApp()
+                target.repo_name = target_repo.name
+                idents = rsp['response']['identifiers']
+                target.output_response = {"response": {"identifiers": idents}}
+
+                # Fetch diff for Dataverse if URL contains "dataset.xhtml"
+
+                if idents:
+                    url = rsp['response']['identifiers'][0]['url']
+                    if url.find("dataset.xhtml") > 0:
+                        logging.info(f'fetching diff for {target.repo_name}')
+                        diff = await fetch_dv_json(rsp, target, json.loads(idh.target_creds), url)
+                        if diff is not None:
+                            raise HTTPException(status_code=409,
+                                                 detail=f"Dataset {dataset_id} has changed on the server. Please check the diff: {diff}")
 
     db_record_metadata = Dataset(id=dataset_id, title=idh.title, owner_id=idh.owner_id, status=dataset_status,
                                  metadata_content=metadata, submission_ready = dataset_submission_ready,
@@ -735,6 +759,48 @@ def get_md(dataset_id: str, req: Request):
     if not dataset:
         raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
     return json.loads(dataset.metadata_content)
+
+
+@router.get("/dataset-is-modified/{dataset_id}")
+async def is_modified(dataset_id: str, req: Request):
+    """
+    Endpoint to retrieve the difference between two dataset versions.
+
+    This endpoint retrieves the difference between two versions of a dataset identified by the given dataset ID.
+
+    Args:
+        datasetId (str): The ID of the dataset to retrieve the difference for.
+
+    Returns:
+        dict: A dictionary containing the difference between the two versions of the dataset.
+
+    Raises:
+        HTTPException: If the dataset is not found.
+    """
+    logging.info(f'find_metadata_by_metadata_id - metadata_id: {dataset_id}')
+    tc_header = req.headers.get('targets-credentials')
+    assistant_name = req.headers.get('assistant-config-name')
+    if not tc_header or not assistant_name:
+        raise HTTPException(status_code=400, detail="Targets credentials are missing and/or assistant-config-name is missing")
+
+    # Attempt to parse the 'targets-credentials' header as JSON
+
+    try:
+        target_creds = json.loads(tc_header)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid json format of targets-credentials")
+
+    app_name = await get_app_name(req)
+    db_manager = data[app_name]
+    dataset = db_manager.find_dataset_only_by_id(dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
+
+    if dataset.status is not StateVersion.SUBMITTED:
+        raise HTTPException(status_code=400, detail=f"Dataset {dataset_id} is not submitted")
+
+    asset = await create_asset(dataset, db_manager, target_creds)
+    return asset
 
 @router.get("/dataset-diff/{dataset_id}")
 async def dataset_diff(dataset_id: str, req: Request):

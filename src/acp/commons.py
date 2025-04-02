@@ -704,7 +704,6 @@ async def get_app_name(req):
     repo_assistant = RepoAssistantDataModel.model_validate_json(repo_config)
     return repo_assistant.app_name
 
-
 async def create_asset(dataset, db_manager, target_creds):
     asset = Asset()
     asset.dataset_id = dataset.id
