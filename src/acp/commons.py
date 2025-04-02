@@ -579,40 +579,34 @@ def create_s3_client():
     )
 
 
-async def fetch_dv_json(rsp, target, target_creds, url):
+async def compare_dv_json(deposited_metadata, target_repo_name, target_creds, api_url):
     """
     Fetch JSON data from a Dataverse API and compare it with the original deposited metadata
     so that we can see whether any changes have been made to the dataset after deposit from the ACP.
 
     Args:
-        rsp (dict): The response dictionary containing deposited metadata.
-        target (TargetApp): The target application instance.
+        deposited_metadata (dict): The response dictionary containing deposited metadata.
+        target_repo_name (TargetApp): The target application instance.
         target_creds (list): A list of credentials for target repositories.
-        url (str): The URL to fetch the JSON data from.
+        api_url (str): The URL to fetch the JSON data from.
 
     Returns:
         dict: The differences between the deposited metadata and the fetched JSON data.
               If no differences are found, returns an empty dictionary.
     """
     # Modify the URL to point to the correct API endpoint
-    url = url.replace("dataset.xhtml", "api/datasets/:persistentId/")
 
     # Iterate over the target credentials to find the matching repository
     for tc in target_creds:
-        if tc["target-repo-name"] == target.repo_name:
+        if tc["target-repo-name"] == target_repo_name:
             api_token = tc["credentials"]["password"]
             headers = dmz_dataverse_headers("API_KEY", api_token)
-            response = requests.get(url, headers=headers)
+            dv_response = requests.get(api_url, headers=headers)
 
-            if response.status_code == 200:
-                deposited_metadata = rsp.get("deposited_metadata")
-                if deposited_metadata:
-                    return Compare().check(deposited_metadata, response.json())
-                else:
-                    logging.info("No deposited metadata found to compare.")
-                    return {}
+            if dv_response.status_code == 200:
+                return Compare().check(deposited_metadata, dv_response.json())
             else:
-                logging.error(f'Error occurs: status code: {response.status_code} from {url}')
+                logging.error(f'Error occurs: status code: {dv_response.status_code} from {api_url}')
 
             break
 
@@ -717,36 +711,32 @@ async def create_asset(dataset, db_manager, target_creds):
         asset.status = dataset.status
 
     # Find target repositories by dataset ID
-    targets_repo = db_manager.find_target_repos_by_dataset_id(dataset.id)
+    target_repo_recs = db_manager.find_target_repos_by_dataset_id(dataset_id=dataset.id, status_not_in=[StateVersion.DRAFT])
     # Process target repositories if the dataset is not in DRAFT release version
-    if dataset.status is not StateVersion.DRAFT:
-        for target_repo in targets_repo:
-            target = TargetApp()
-            target.repo_name = target_repo.name
-            target.display_name = target_repo.display_name
-            target.deposit_status = target_repo.deposit_status.name.lower()
-            target.deposited_at = target_repo.deposited_at.strftime(
-                '%Y-%m-%d %H:%M:%S') if target_repo.deposited_at else ''
-            target.deposit_duration = str(target_repo.deposit_duration)
+    for target_repo_rec in target_repo_recs:
+        target_app = TargetApp()
+        target_app.repo_name = target_repo_rec.name
+        target_app.display_name = target_repo_rec.display_name
+        target_app.deposit_status = target_repo_rec.deposit_status.name.lower()
+        target_app.deposited_at = target_repo_rec.deposited_at.strftime(
+            '%Y-%m-%d %H:%M:%S') if target_repo_rec.deposited_at else ''
+        target_app.deposit_duration = str(target_repo_rec.deposit_duration)
 
-            # Parse the target repository output as JSON if available
-            rsp = json.loads(target_repo.target_service_response) if target_repo.target_service_response else {}
-            if rsp:
-                idents = rsp['response']['identifiers']
-                target.output_response = {"response": {"identifiers": idents}}
+        # Parse the target repository output as JSON if available
+        target_service_response_json = json.loads(target_repo_rec.target_service_response) if target_repo_rec.target_service_response else {}
+        target_service_response_deposited_metadata = target_service_response_json.get('deposited_metadata')
+        target_repo_identifiers = target_repo_rec.deposited_identifiers
+        if target_repo_identifiers:
+            target_repo_identifiers_json = json.loads(target_repo_identifiers)
+            target_app.deposited_identifiers = target_repo_identifiers_json
+            api_url = target_repo_identifiers_json[0]['api-url']
+            target_app.diff = await compare_dv_json(target_service_response_deposited_metadata, target_repo_rec.name,
+                                                    target_creds, api_url)
 
-                # Fetch diff for Dataverse if URL contains "dataset.xhtml"
-                if idents:
-                    url = rsp['response']['identifiers'][0]['url']
-                    if url.find("dataset.xhtml") > 0:
-                        logging.info(f'fetching diff for {target.repo_name}')
-                        target.diff = await fetch_dv_json(rsp, target, target_creds, url)
-                else:
-                    target.output_response = {}
-            else:
-                target.output_response = {}
+        else:
+            target_app.output_response = {}
 
-            asset.targets.append(target)
+        asset.targets.append(target_app)
     return asset
 
 

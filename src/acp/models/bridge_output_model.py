@@ -56,9 +56,18 @@ class IdentifierItem(BaseModel):
         protocol (IdentifierProtocol): The protocol of the identifier.
         url (Optional[str]): The URL associated with the identifier.
     """
+
     value: str = None
     protocol: IdentifierProtocol = IdentifierProtocol.DOI
     url: Optional[str] = None
+    api_url: Optional[str] = None
+    def to_dict(self):
+        return {
+            "value": self.value,
+            "protocol": self.protocol.value,
+            "url": self.url,
+            "api-url": self.api_url
+        }
 
 
 class TargetResponse(BaseModel):
@@ -100,6 +109,7 @@ class TargetDataModel(BaseModel):
     deposit_status: Optional[DepositStatus] = Field(None, alias='deposit-status')
     payload: Optional[dict|str] = Field(None, alias='payload')
     deposited_metadata: Optional[dict|str] = Field(None, alias='deposited-metadata')  #
+    deposited_identifiers: Optional[List[IdentifierItem]] = Field(None, alias='deposited-identifiers')
     deposited_version: Optional[str] = Field(default="", alias='deposited-version')
     response: TargetResponse = Field(default_factory=TargetResponse)
 

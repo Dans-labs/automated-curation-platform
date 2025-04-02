@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Awaitable, Optional
 
+import requests
 import httpx
 import jmespath
 from fastapi import APIRouter, Request, HTTPException
@@ -20,7 +21,7 @@ from fastapi import APIRouter, Request, HTTPException
 from src.acp.commons import (app_settings, data,
                              get_class, handle_ps_exceptions, \
                              send_mail, delete_symlink_and_target, retrieve_targets_configuration, get_app_name,
-                             create_asset, fetch_dv_json)
+                             create_asset, compare_dv_json, dmz_dataverse_headers)
 from src.acp.dbz import TargetRepo, DataFile, Dataset, StateVersion, DepositStatus, \
     DatasetWorkState, MetadataType, AccessLevel, DataFileState
 from src.acp.models.app_model import ResponseDataModel, InboxDatasetDataModel, TargetApp
@@ -146,27 +147,19 @@ async def process_inbox(status, request):
 
     if status in [StateVersion.DRAFT_RESUBMIT, StateVersion.RESUBMIT]:
         # Check if the dataset has changed on the server
-        target_repos = db_manager.find_target_repos_by_dataset_id(dataset_id=dataset.id, is_submitted=True)
+        target_repo_recs = db_manager.find_target_repos_by_dataset_id(dataset_id=dataset.id, status_not_in=[StateVersion.DRAFT])
 
-        for target_repo in target_repos:
-            rsp = json.loads(target_repo.target_service_response) if target_repo.target_service_response else {}
-            if rsp:
-                idents = rsp['response']['identifiers']
-                target = TargetApp()
-                target.repo_name = target_repo.name
-                idents = rsp['response']['identifiers']
-                target.output_response = {"response": {"identifiers": idents}}
-
-                # Fetch diff for Dataverse if URL contains "dataset.xhtml"
-
-                if idents:
-                    url = rsp['response']['identifiers'][0]['url']
-                    if url.find("dataset.xhtml") > 0:
-                        logging.info(f'fetching diff for {target.repo_name}')
-                        diff = await fetch_dv_json(rsp, target, json.loads(idh.target_creds), url)
-                        if diff is not None:
-                            raise HTTPException(status_code=409,
-                                                 detail=f"Dataset {dataset_id} has changed on the server. Please check the diff: {diff}")
+        for target_repo_rec in target_repo_recs:
+            target_repo_identifiers_json = json.loads(target_repo_rec.deposited_identifiers)
+            target_service_response_json = json.loads(target_repo_rec.target_service_response) if target_repo_rec.target_service_response else {}
+            target_service_response_deposited_metadata = target_service_response_json.get('deposited_metadata')
+            if target_service_response_deposited_metadata:
+                api_url = target_repo_identifiers_json[0]['api-url']
+                diff = await compare_dv_json(target_service_response_deposited_metadata, target_repo_rec.name, json.loads(idh.target_creds), api_url)
+                if diff:
+                    raise HTTPException(status_code=409,
+                                        detail=f"Dataset {dataset_id} has changed on the server. Please check the diff: {diff}")
+                continue
 
     db_record_metadata = Dataset(id=dataset_id, title=idh.title, owner_id=idh.owner_id, status=dataset_status,
                                  metadata_content=metadata, submission_ready = dataset_submission_ready,
@@ -238,7 +231,8 @@ async def delete_dataset_metadata(request: Request, dataset_id: str, status: Opt
     if dataset.id not in db_manager.find_dataset_ids_by_owner(user_id):
         raise HTTPException(status_code=404, detail='No Dataset found')
 
-    target_repos = db_manager.find_target_repos_by_dataset_id(dataset.id)
+    target_repos = db_manager.find_target_repos_by_dataset_id(
+        dataset_id=dataset.id, status_not_in=[StateVersion.SUBMITTED, StateVersion.RESUBMIT, StateVersion.DRAFT_RESUBMIT])
     if not target_repos:
         logging.info(f'Delete dataset: {dataset.id}, NOT target_repos')
         return delete_dataset_and_its_folder(db_manager, dataset.id, app_name)
@@ -842,3 +836,48 @@ async def dataset_diff(dataset_id: str, req: Request):
 
     asset = await create_asset(dataset, db_manager, target_creds)
     return asset
+
+
+@router.post("/create-dataset-form/{url:path}")
+async def create_dataset_form(url: str, req: Request):
+    # The full_path will contain everything after /create-dataset-form/
+    # including any slashes, but still not the query parameters
+    tc_header = req.headers.get('targets-credentials')
+    assistant_name = req.headers.get('assistant-config-name')
+    if not tc_header or not assistant_name:
+        raise HTTPException(status_code=400,
+                            detail="Targets credentials are missing and/or assistant-config-name is missing")
+
+    # Attempt to parse the 'targets-credentials' header as JSON
+
+    try:
+        target_creds = json.loads(tc_header)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid json format of targets-credentials")
+
+    app_name = await get_app_name(req)
+    db_manager = data[app_name]
+
+    persistent_id = req.query_params.get('persistentId')
+    print(f'persistentId: {persistent_id}')
+    target_repo =  db_manager.find_indentifier_by_doi(persistent_id)
+    if not target_repo:
+        for cred in target_creds:
+            if cred["target-repo-name"] == 'dataverse.local':
+                headers = dmz_dataverse_headers("API_KEY", cred["credentials"]["password"])
+                dataset_url = f'{url}?{req.url.query}'
+                print(dataset_url)
+                target_url = dataset_url.replace("dataset.xhtml", "api/datasets/:persistentId/")
+                print(url)
+                response = requests.get(target_url, headers=headers)
+                if response.status_code != 200:
+                    raise HTTPException(status_code=400,
+                                        detail=f"Failed to fetch dataset {persistent_id} from Dataverse: {response.text}")
+
+                return response.json()
+
+    else:
+        pass
+
+
+

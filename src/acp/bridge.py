@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 from abc import ABC, abstractmethod
@@ -87,11 +88,15 @@ class Bridge(ABC):
         duration = output_data_model.response.duration if output_data_model else 0.0
         output = output_data_model.model_dump_json() if output_data_model else None
         deposited_version = output_data_model.deposited_version if output_data_model else ''
+        # deposited_identifiers = output_data_model.deposited_identifiers if output_data_model else ''
+        str_deposited_identifiers = json.dumps([i.to_dict() for i in output_data_model.deposited_identifiers]) if output_data_model and output_data_model.deposited_identifiers else ''
         if output_data_model:
-            logging.info(f'Save state for dataset_id: {self.dataset_id}. Target: {self.target.repo_name}')
+            # str_deposited_identifiers = json.dumps([i.to_dict() for i in deposited_identifiers])
+            logging.info(f'Save state for dataset_id: {self.dataset_id}. Target: {self.target.repo_name}. Deposited version: {deposited_version}. str_deposited_identifiers: {str_deposited_identifiers}')
+
         self.db_manager.update_target_repo_deposit_status(TargetRepo(dataset_id=self.dataset_id, name=self.target.repo_name,
                                                                 deposit_status=deposit_status.upper(), target_service_response=output,
-                                                                deposit_duration=duration, deposited_version=deposited_version))
+                                                                deposit_duration=duration, deposited_version=deposited_version, deposited_identifiers= str_deposited_identifiers))
 
     def deposit_files(self):
         pass

@@ -18,7 +18,6 @@ from typing import Optional, List
 from enum import Enum
 from sqlalchemy.orm import selectinload
 
-
 class StateVersion(StrEnum):
     DRAFT = 'DRAFT'
     PUBLISH = 'PUBLISH'
@@ -119,6 +118,7 @@ class TargetRepo(SQLModel, table=True):
     deposit_duration: float = 0.0 #the amount of time taken for the deposit process
     target_service_response: Optional[str]
     deposited_version: Optional[str]
+    deposited_identifiers: Optional[str] = Field(default="", index=True)
 
     # Relationship to Parent
     dataset: Optional["Dataset"] = Relationship(back_populates="target_repos")
@@ -472,22 +472,15 @@ class DatabaseManager:
             result = results.all()
         return result
 
-    def find_target_repos_by_dataset_id(self,dataset_id: str, is_submitted: bool = False) -> [TargetRepo]:
+    def find_target_repos_by_dataset_id(self,dataset_id: str, status_not_in: [StateVersion]) -> [TargetRepo]:
+        #Note: Dataset.status not in status
         with Session(self.engine) as session:
-            if is_submitted:
-                statement = (
-                    select(TargetRepo)
-                    .join(Dataset, TargetRepo.dataset_id == Dataset.id)
-                    .where(Dataset.id == dataset_id and Dataset.status == StateVersion.SUBMITTED)
-                    .order_by(TargetRepo.id)
-                )
-            else:
-                statement = (
-                    select(TargetRepo)
-                    .join(Dataset, TargetRepo.dataset_id == Dataset.id)
-                    .where(Dataset.id == dataset_id)
-                    .order_by(TargetRepo.id)
-                )
+            statement = (
+                select(TargetRepo)
+                .join(Dataset, TargetRepo.dataset_id == Dataset.id)
+                .where(Dataset.id == dataset_id,  Dataset.status.notin_(status_not_in))
+                .order_by(TargetRepo.id)
+            )
             results = session.exec(statement)
             target_repos = results.all()
             for target_repo in target_repos:
@@ -577,6 +570,8 @@ class DatabaseManager:
             target_repo_record = results.one_or_none()
             if target_repo:
                 target_repo_record.deposit_status = target_repo.deposit_status
+                target_repo_record.deposited_version = target_repo.deposited_version
+                target_repo_record.deposited_identifiers = target_repo.deposited_identifiers
                 if target_repo.target_service_response:
                     target_repo_record.target_service_response = target_repo.target_service_response
                 target_repo_record.deposited_at = datetime.now(timezone.utc)
@@ -673,3 +668,11 @@ class DatabaseManager:
             for file_record in results.all():
                 session.delete(file_record)
             session.commit()
+
+    def find_indentifier_by_doi(self,doi: str) -> Optional[TargetRepo]:
+        print("doi:", doi)
+        with Session(self.engine) as session:
+            statement = select(TargetRepo).where(TargetRepo.deposited_identifiers.contains(doi))
+            results = session.exec(statement)
+            result = results.one_or_none()
+        return result

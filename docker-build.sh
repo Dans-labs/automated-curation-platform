@@ -14,10 +14,10 @@ if [ "$PLATFORM" != "amd64" ] && [ "$PLATFORM" != "arm64" ]; then
 fi
 
 # Path to the pyproject.toml file
-PYPROJECT_TOML="/Users/akmi/surfdrive/WORK-2025/INFRA-DANS-LABS/automated-curation-platform/pyproject.toml"
+PYPROJECT_TOML="./pyproject.toml"
 
 # Extract the version from the pyproject.toml file
-VERSION=$(grep -Eo 'version\s*=\s*"[0-9]+\.[0-9]+\.[0-9]+"' "$PYPROJECT_TOML" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+')
+VERSION=$(grep -Eo 'version\s*=\s*"[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?"' "$PYPROJECT_TOML" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?')
 
 # Check if the version was extracted successfully
 if [ -z "$VERSION" ]; then

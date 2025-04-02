@@ -157,8 +157,9 @@ class DataverseIngester(Bridge):
         logging.info(f"Data ingest successfully! {json.dumps(dv_response_json)}")
         pid = dv_response_json["data"]["persistentId"]
         self.__set_repo_identifiers(identifier_items, pid, target_repo_response)
+        tdm.deposited_identifiers = identifier_items#json.dumps([i.model_dump() for i in identifier_items])
+        tdm.deposited_version = "DRAFT" # TODO: Check the version
         tdm.deposit_status = DepositStatus.FINISH
-        tdm.deposited_version = StateVersion.DRAFT
         if self.target.metadata and self.target.metadata.transformed_metadata:
             if self.dataset_rec.metadata_type == MetadataType.JSON:
                 self.__ingest_files(pid, str_updated_metadata, dv_headers)
@@ -166,7 +167,8 @@ class DataverseIngester(Bridge):
         if self.target.initial_release_version == StateVersion.PUBLISHED:
             logging.info('Publish the dataset')
             target_repo_response.status_code = self.__publish_dataset(pid, dv_headers)
-            tdm.deposited_version = StateVersion.PUBLISHED
+            # tdm.deposited_version = StateVersion.PUBLISHED
+
         return dv_response, pid
 
     def __handle_resubmit_dataset(self, dv_headers, str_dv_metadata, str_updated_metadata, target_repo_response, tdm):
@@ -176,8 +178,8 @@ class DataverseIngester(Bridge):
         pid = tsr["response"]["identifiers"][0]["value"]
         identifier_items = []
         self.__set_repo_identifiers(identifier_items, pid, target_repo_response)
-        tdm.deposit_status = DepositStatus.FINISH
-        tdm.deposited_version = StateVersion.DRAFT
+        tdm.deposited_identifiers = identifier_items#json.dumps([i.model_dump() for i in identifier_items])
+        tdm.deposited_version = tsr["deposited_metadata"]["data"]["latestVersion"]["versionState"]
         md_json = json.loads(str_dv_metadata)
         md_block_only = md_json["datasetVersion"]["metadataBlocks"]
         term_of_access = md_json["datasetVersion"]["termsOfAccess"]
@@ -200,7 +202,7 @@ class DataverseIngester(Bridge):
     def __set_repo_identifiers(self, identifier_items, pid, target_repo):
         identifier_items.append(
             IdentifierItem(value=pid, url=f'{self.target.base_url}/dataset.xhtml?persistentId={pid}',
-                           protocol=IdentifierProtocol('doi')))
+                           protocol=IdentifierProtocol('doi'), api_url=f'{self.target.base_url}/api/datasets/:persistentId?persistentId={pid}'))
         logging.info(f"pid: {pid}")
         target_repo.identifiers = identifier_items
 
@@ -274,6 +276,7 @@ class DataverseIngester(Bridge):
                                      headers=headers)
         #TODO: Check status code
         dv_latest_version_json = dv_latest_version.json()
+        print(json.dumps(dv_latest_version_json, indent=2))
         files = dv_latest_version_json["data"]["files"]
         logging.info(f'Found {len(files)} files in Remote Dataverse Target.')
         for file in files:

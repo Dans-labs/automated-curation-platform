@@ -50,6 +50,7 @@ class SwhApiDepositor(Bridge):
             goto_sleep = False
             counter = 0  # TODO: Refactor using Tenancy!
             while True and (counter < app_settings.SWH_API_MAX_RETRIES):
+                logging.info(f'SWH counter: {counter}')
                 counter += 1
                 swh_check_url = api_resp_json.get("request_url")
                 step1_check_resp = requests.get(swh_check_url, headers=headers)
@@ -109,6 +110,7 @@ class SwhApiDepositor(Bridge):
                         ideni = IdentifierItem(value=swhid_dir, url=swhid_dir_url,
                                                protocol=IdentifierProtocol('swhid'))
                         identifier_items.append(ideni)
+                        tdm.deposited_identifiers = identifier_items
                         break
                     else:
                         goto_sleep = True
