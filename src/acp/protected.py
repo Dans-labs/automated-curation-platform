@@ -722,7 +722,7 @@ def remove_files_and_directories(dir_path):
             logging.info(f"Directory {item_path} and all its contents have been removed")
 
 
-@router.get("/dataset/{dataset_id}/md", include_in_schema=False)
+@router.get("/dataset/{dataset_id}/metadata", include_in_schema=False)
 def get_md(dataset_id: str, req: Request):
     """
     Endpoint to retrieve the metadata of a dataset.
@@ -755,7 +755,7 @@ def get_md(dataset_id: str, req: Request):
     return json.loads(dataset.metadata_content)
 
 
-@router.get("/dataset-is-modified/{dataset_id}")
+@router.get("/dataset/{dataset_id}/status")
 async def is_modified(dataset_id: str, req: Request):
     """
     Endpoint to retrieve the difference between two dataset versions.
@@ -796,7 +796,7 @@ async def is_modified(dataset_id: str, req: Request):
     asset = await create_asset(dataset, db_manager, target_creds)
     return asset
 
-@router.get("/dataset-diff/{dataset_id}")
+@router.get("/dataset/{dataset_id}/diff")
 async def dataset_diff(dataset_id: str, req: Request):
     """
     Endpoint to retrieve the difference between two dataset versions.
@@ -838,7 +838,7 @@ async def dataset_diff(dataset_id: str, req: Request):
     return asset
 
 
-@router.post("/create-dataset-form/{url:path}")
+@router.post("/dataset/prefill/{url:path}")
 async def create_dataset_form(url: str, req: Request):
     # The full_path will contain everything after /create-dataset-form/
     # including any slashes, but still not the query parameters
