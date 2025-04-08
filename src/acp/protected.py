@@ -20,8 +20,8 @@ from fastapi import APIRouter, Request, HTTPException
 
 from src.acp.commons import (app_settings, data,
                              get_class, handle_ps_exceptions, \
-                             send_mail, delete_symlink_and_target, retrieve_targets_configuration, get_app_name,
-                             create_asset, compare_dv_json, dmz_dataverse_headers)
+                             send_mail, delete_symlink_and_target, retrieve_targets_configuration, get_repo_assistant,
+                             create_asset, compare_dv_json, dmz_dataverse_headers, base_dir)
 from src.acp.dbz import TargetRepo, DataFile, Dataset, StateVersion, DepositStatus, \
     DatasetWorkState, MetadataType, AccessLevel, DataFileState
 from src.acp.models.app_model import ResponseDataModel, InboxDatasetDataModel, TargetApp
@@ -110,10 +110,9 @@ async def process_inbox(status, request):
     """
 
     idh = await get_inbox_dataset_dc(request, status)
-    repo_config = retrieve_targets_configuration(idh.assistant_name)
-    repo_assistant = RepoAssistantDataModel.model_validate_json(repo_config)
 
-    app_name = await get_app_name(request)
+    repo_assistant = await get_repo_assistant(request)
+    app_name = repo_assistant.app_name
     db_manager = data[app_name]
 
     if request.headers.get('dataset_id'):
@@ -221,7 +220,8 @@ async def delete_dataset_metadata(request: Request, dataset_id: str, status: Opt
     """
     logging.info(f'Delete dataset: {dataset_id}')
 
-    app_name = await get_app_name(request)
+    repo_assistant = await get_repo_assistant(request)
+    app_name = repo_assistant.app_name
     db_manager = data[app_name]
     dataset = db_manager.find_dataset_by_id(dataset_id)
     user_id = request.headers.get('user-id')
@@ -487,8 +487,8 @@ async def upload_file(dataset_id: str, file_uuid: str, req: Request) -> {}:
         HTTPException: If there is a file size mismatch.
     """
     logging.info(f'find_metadata_by_metadata_id - dataset_id: {dataset_id}')
-    app_name= await get_app_name(req)
-
+    repo_assistant= await get_repo_assistant(req)
+    app_name = repo_assistant.app_name
     db_manager = data[app_name]
     dataset = db_manager.find_dataset_by_id(dataset_id)
     logging.info(f'PATCH file metadata for metadata_id: {dataset_id}, dataset_id: {dataset_id} and file_uuid: {file_uuid}' )
@@ -524,10 +524,11 @@ async def upload_file(dataset_id: str, file_uuid: str, req: Request) -> {}:
     target = source_file_path
     link_name = dest_file_path
     try:
-        md5_hash = ""
-        if app_settings.get("use_md5_hash", False):
-            with open(source_file_path, 'rb') as file:
-                md5_hash = hashlib.md5(file.read()).hexdigest()
+        sha1_hash = calculate_sha1_checksum(source_file_path)
+        # md5_hash = ""
+        # if app_settings.get("use_md5_hash", True):
+        #     with open(source_file_path, 'rb') as file:
+        #         md5_hash = hashlib.md5(file.read()).hexdigest()
             # with open(source_file_path, "rb") as f:
             #     file_hash = hashlib.md5()
             #     while chunk := f.read(8192):
@@ -535,7 +536,7 @@ async def upload_file(dataset_id: str, file_uuid: str, req: Request) -> {}:
             # md5_hash = file_hash.hexdigest()
 
         file_type = file_metadata['metadata'].get('filetype', mimetypes.guess_type(dest_file_path)[0])
-        db_manager.update_file(DataFile(dataset_id=dataset.id, name=file_name, checksum=md5_hash,
+        db_manager.update_file(DataFile(dataset_id=dataset.id, name=file_name, checksum=sha1_hash,
                                         size=os.path.getsize(source_file_path), mime_type=file_type,
                                         path=dest_file_path, state=DataFileState.UPLOADED))
         new_name = f'{target}-{dataset_id}.{app_name}'
@@ -574,7 +575,22 @@ async def upload_file(dataset_id: str, file_uuid: str, req: Request) -> {}:
     rdm.start_process = start_process
     return rdm.model_dump(by_alias=True)
 
+def calculate_sha1_checksum(file_path):
+    """
+    Calculate the SHA-1 checksum of a file.
 
+    Args:
+        file_path (str): Path to the file.
+
+    Returns:
+        str: The SHA-1 checksum as a hexadecimal string.
+    """
+    sha1 = hashlib.sha1()
+    with open(file_path, 'rb') as f:
+        # Read the file in chunks to handle large files
+        for chunk in iter(lambda: f.read(4096), b''):
+            sha1.update(chunk)
+    return sha1.hexdigest()
 def bridge_job(db_manager, app_name, dataset_id: str, msg: str) -> None:
     """
     Start a new thread to follow the bridge process for a dataset.
@@ -784,8 +800,8 @@ async def is_modified(dataset_id: str, req: Request):
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid json format of targets-credentials")
 
-    app_name = await get_app_name(req)
-    db_manager = data[app_name]
+    repo_assistant = await get_repo_assistant(req)
+    db_manager = data[repo_assistant.app_name]
     dataset = db_manager.find_dataset_only_by_id(dataset_id)
     if not dataset:
         raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
@@ -825,8 +841,8 @@ async def dataset_diff(dataset_id: str, req: Request):
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid json format of targets-credentials")
 
-    app_name = await get_app_name(req)
-    db_manager = data[app_name]
+    repo_assistant = await get_repo_assistant(req)
+    db_manager = data[repo_assistant.app_name]
     dataset = db_manager.find_dataset_only_by_id(dataset_id)
     if not dataset:
         raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
@@ -837,47 +853,97 @@ async def dataset_diff(dataset_id: str, req: Request):
     asset = await create_asset(dataset, db_manager, target_creds)
     return asset
 
-
+import httpx
 @router.post("/dataset/prefill/{url:path}")
 async def create_dataset_form(url: str, req: Request):
     # The full_path will contain everything after /create-dataset-form/
     # including any slashes, but still not the query parameters
     tc_header = req.headers.get('targets-credentials')
-    assistant_name = req.headers.get('assistant-config-name')
-    if not tc_header or not assistant_name:
+    if not tc_header:
         raise HTTPException(status_code=400,
                             detail="Targets credentials are missing and/or assistant-config-name is missing")
 
-    # Attempt to parse the 'targets-credentials' header as JSON
-
     try:
         target_creds = json.loads(tc_header)
+        if len(target_creds) != 1:
+            raise HTTPException(status_code=501, detail="Only one target repo is supported")
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid json format of targets-credentials")
 
-    app_name = await get_app_name(req)
-    db_manager = data[app_name]
+    repo_assistant = await get_repo_assistant(req)
+    db_manager = data[repo_assistant.app_name]
 
     persistent_id = req.query_params.get('persistentId')
-    print(f'persistentId: {persistent_id}')
-    target_repo =  db_manager.find_indentifier_by_doi(persistent_id)
-    if not target_repo:
-        for cred in target_creds:
-            if cred["target-repo-name"] == 'dataverse.local':
-                headers = dmz_dataverse_headers("API_KEY", cred["credentials"]["password"])
-                dataset_url = f'{url}?{req.url.query}'
-                print(dataset_url)
-                target_url = dataset_url.replace("dataset.xhtml", "api/datasets/:persistentId/")
-                print(url)
-                response = requests.get(target_url, headers=headers)
-                if response.status_code != 200:
-                    raise HTTPException(status_code=400,
-                                        detail=f"Failed to fetch dataset {persistent_id} from Dataverse: {response.text}")
+    target_repo_rec =  db_manager.find_target_repo_by_indentifier(persistent_id)
+    if target_repo_rec:
+        target_repo_identifiers_json = json.loads(target_repo_rec.deposited_identifiers)
+        target_service_response_json = json.loads(
+            target_repo_rec.target_service_response) if target_repo_rec.target_service_response else {}
+        target_service_response_deposited_metadata = target_service_response_json.get('deposited_metadata')
+        if target_service_response_deposited_metadata:
+            api_url = target_repo_identifiers_json[0]['api-url']
+            diff = await compare_dv_json(target_service_response_deposited_metadata, target_repo_rec.name, target_creds,
+                                         api_url)
+            if diff:
+                raise HTTPException(status_code=501,
+                                    detail=f"Dataset {persistent_id} has changed on the server. Not implemented yet")
+            public_url = f"http://localhost:10124/dataset/{target_repo_rec.dataset_id}"
+        else:
+            public_url = f"http://localhost:10124/dataset/{target_repo_rec.dataset_id}"
+
+
+    else:
+
+        if len(target_creds) != 1:
+            raise HTTPException(status_code=501, detail="Only one target repo is supported")
+
+        assistant_targets_repo = repo_assistant.targets
+
+        if len(assistant_targets_repo) != 1 or assistant_targets_repo[0].bridge_plugin_name != 'DataverseIngester':
+            raise HTTPException(status_code=501, detail="Only Dataverse is supported")
+
+        if target_creds[0]["target-repo-name"] == assistant_targets_repo[0].repo_name:
+
+            response = await fetch_dataverse(req, target_creds, url)
+
+            if response.status_code == 200:
 
                 return response.json()
 
-    else:
-        pass
+            elif response.status_code == 404:
+
+                with open(f'{base_dir}/resources/examples/minimal-form.json', 'r') as f:
+
+                    json_data = json.load(f)
+
+                    json_data["id"] = f'{repo_assistant.app_name}-{uuid.uuid4().hex}'
+
+                return json_data
+
+            raise HTTPException(status_code=400,
+                                detail=f"Failed to fetch dataset {persistent_id} from Dataverse: {response.text}")
+
+        raise HTTPException(status_code=501, detail=f"{assistant_targets_repo[0].repo_name} is not supported)")
+
+    headers = {key: value for key, value in req.headers.items() if key.lower() != 'content-length'}
+
+    async with httpx.AsyncClient() as client:
+
+        response = await client.get(public_url, headers=headers)
+
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+
+        return response.json()
+
+
+async def fetch_dataverse(req, target_creds, url):
+    headers = dmz_dataverse_headers("API_KEY", target_creds[0]["credentials"]["password"])
+    dataset_url = f'{url}?{req.url.query}'
+    target_url = dataset_url.replace("dataset.xhtml", "api/datasets/:persistentId/")
+    response = requests.get(target_url, headers=headers)
+    return response
+
 
 
 

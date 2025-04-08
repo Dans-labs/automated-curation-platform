@@ -640,7 +640,7 @@ class DatabaseManager:
     def is_dataset_ready(self,dataset_id: str) -> bool:
         with Session(self.engine) as session:
             dataset_id_rec = session.exec(
-                select(Dataset.id).where((Dataset.id == dataset_id) & Dataset.submission_ready)).one_or_none()
+                select(Dataset.id).where((Dataset.id == dataset_id) & Dataset.submission_ready &  (Dataset.status.notin_([StateVersion.DRAFT, StateVersion.DRAFT_RESUBMIT])))).one_or_none()
             return dataset_id_rec is not None
 
     def are_files_uploaded(self,dataset_id: str) -> bool:
@@ -669,7 +669,7 @@ class DatabaseManager:
                 session.delete(file_record)
             session.commit()
 
-    def find_indentifier_by_doi(self,doi: str) -> Optional[TargetRepo]:
+    def find_target_repo_by_indentifier(self, doi: str) -> Optional[TargetRepo]:
         print("doi:", doi)
         with Session(self.engine) as session:
             statement = select(TargetRepo).where(TargetRepo.deposited_identifiers.contains(doi))

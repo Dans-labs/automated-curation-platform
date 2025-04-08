@@ -12,7 +12,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from functools import wraps
 from tempfile import NamedTemporaryFile
-from typing import Any, Callable, dataclass_transform
+from typing import Any, Callable
 
 import boto3
 import psutil
@@ -689,14 +689,15 @@ def retrieve_apps_list() -> str:
     return rsp.json()
 
 
-async def get_app_name(req):
+#TODO: Refactor this function, retrieve repo_config_name instead of only app_mae
+async def get_repo_assistant(req):
     assistant_name = req.headers.get('assistant-config-name')
     if assistant_name is None:
         raise HTTPException(status_code=400, detail="assistant-config-name")
 
     repo_config = retrieve_targets_configuration(assistant_name)
     repo_assistant = RepoAssistantDataModel.model_validate_json(repo_config)
-    return repo_assistant.app_name
+    return repo_assistant
 
 async def create_asset(dataset, db_manager, target_creds):
     asset = Asset()

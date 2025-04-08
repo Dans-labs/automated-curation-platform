@@ -8,7 +8,7 @@ import shutil
 from fastapi import APIRouter, Request, HTTPException
 from starlette.responses import FileResponse
 
-from src.acp.commons import app_settings, data, get_app_name
+from src.acp.commons import app_settings, data, get_repo_assistant
 
 # Import custom plugins and classes
 
@@ -72,8 +72,8 @@ async def delete_inbox(dataset_id: str, req: Request):
     Returns:
         dict: A dictionary containing the status of the deletion and the number of rows deleted.
     """
-    app_name = await get_app_name(req)
-    db_manager = data[app_name]
+    repo_assistant = await get_repo_assistant(req)
+    db_manager = data[repo_assistant.app_name]
 
     dataset_id = db_manager.find_draft_dataset_id_by_md_id(dataset_id)
     num_rows_deleted = db_manager.delete_by_dataset_id(dataset_id)
@@ -190,8 +190,8 @@ async def delete_all_recs(req: Request):
         Logs the action of deleting all records.
     """
     logging.info('Deleting all')
-    app_name = await get_app_name(req)
-    db_manager = data[app_name]
+    repo_assistant = await get_repo_assistant(req)
+    db_manager = data[repo_assistant.app_name]
     return db_manager.delete_all()
 
 

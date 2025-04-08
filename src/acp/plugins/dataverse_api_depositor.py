@@ -92,6 +92,7 @@ class DataverseIngester(Bridge):
 
             str_updated_metadata = json.dumps(md_json, indent=4)
             self.dataset_rec.metadata_content = str_updated_metadata
+            tdm.deposit_source = md_json
 
             self.db_manager.update_dataset(self.dataset_rec)
         else:
@@ -123,12 +124,12 @@ class DataverseIngester(Bridge):
         # Check whether the dataset is new or not
 
         if self.dataset_rec.status == StateVersion.RESUBMIT:
-            dv_response, pid = self.__handle_resubmit_dataset(dv_headers, str_dv_metadata, str_updated_metadata,
-                                                              target_repo_response, tdm)
+            dv_response, pid = self.__process_resubmit_dataset(dv_headers, str_dv_metadata, str_updated_metadata,
+                                                               target_repo_response, tdm)
         else:
             #This is a new dataset
-            dv_response, pid = self.__handle_submit_dataset(dv_headers, str_dv_metadata, str_updated_metadata,
-                                                            target_repo_response, tdm)
+            dv_response, pid = self.__process_submit_dataset(dv_headers, str_dv_metadata, str_updated_metadata,
+                                                             target_repo_response, tdm)
 
         current_time = datetime.now(timezone.utc).isoformat()
         tdm.deposit_time = current_time
@@ -147,7 +148,7 @@ class DataverseIngester(Bridge):
         tdm.response = target_repo_response
         return tdm
 
-    def __handle_submit_dataset(self, dv_headers, str_dv_metadata, str_updated_metadata, target_repo_response, tdm):
+    def __process_submit_dataset(self, dv_headers, str_dv_metadata, str_updated_metadata, target_repo_response, tdm):
         logging.info(f'Ingesting metadata {self.dataset_id} to {self.target.target_url}')
         dv_response = requests.post(self.target.target_url, headers=dv_headers, data=str_dv_metadata)
         # TODO: Check status code, then handle the case.  It must be 201
@@ -171,7 +172,7 @@ class DataverseIngester(Bridge):
 
         return dv_response, pid
 
-    def __handle_resubmit_dataset(self, dv_headers, str_dv_metadata, str_updated_metadata, target_repo_response, tdm):
+    def __process_resubmit_dataset(self, dv_headers, str_dv_metadata, str_updated_metadata, target_repo_response, tdm):
         target_repo_rec = self.db_manager.find_target_repo(dataset_id=self.dataset_id,
                                                            target_name=self.target.repo_name)
         tsr = json.loads(target_repo_rec.target_service_response)
@@ -270,103 +271,106 @@ class DataverseIngester(Bridge):
 
         str_dv_file = self.__transform_metadata_to_dataverse_json(str_updated_metadata_json,
                                                                   app_settings.get("DV_FILES", "dataset-files.json"))
+        dv_file_json = json.loads(str_dv_file)
 
         #Get the files metadata from the latest version:
         dv_latest_version = requests.get(f'{self.target.base_url}/api/datasets/:persistentId/versions/:latest?persistentId={pid}',
                                      headers=headers)
         #TODO: Check status code
         dv_latest_version_json = dv_latest_version.json()
-        print(json.dumps(dv_latest_version_json, indent=2))
-        files = dv_latest_version_json["data"]["files"]
-        logging.info(f'Found {len(files)} files in Remote Dataverse Target.')
-        for file in files:
-            file_id = file["dataFile"]["id"]
-            file_name = file["dataFile"]["filename"]
-            logging.info(f'Re-Ingesting file_id: {file_id} file_name: {file_name}')
-            file_rec = self.db_manager.find_file_by_name(self.dataset_id, file_name)
-            if not file_rec:
-                #TODO: Handle this case
-                logging.info(f"File {file_name} is not found in the database. Deleting file_id: {file_id}")
-                delete_response = requests.delete(f"{self.target.base_url}/api/files/{file_id}", headers=headers)
-                logging.info(f"delete_response.status_code: {delete_response.status_code} delete_response.text: {delete_response.text}")
-                continue
-
-            logging.info(f'Ingesting file {file_rec.name}. Size: {file_rec.size} Path: {file_rec.path}')
-
-            jsonData = json.loads(str_dv_file).get(file_name)
-            if not jsonData:
-                logging.error(f"jsonData {jsonData} is not found in the database")
-                continue
-            if not os.path.exists(file_rec.path):
-                # Updating file metadata only
-                resp = requests.post(f"{self.target.base_url}/api/files/{file_id}/metadata", headers=headers,
-                                     files={"jsonData": (None, json.dumps(jsonData), "application/json")})
-                logging.info(f"Updating file metadata. resp.status_code: {resp.status_code} resp.text: {resp.text}")
-                continue
-
-            start = time.perf_counter()
-            jsonData["forceReplace"] = True
-            data = {"jsonData": json.dumps(jsonData)}
-            if file_rec.mime_type == "application/zip":
-                real_file_path = os.readlink(file_rec.path)
-                zip_file_name = f'{os.path.dirname(real_file_path)}/{file_rec.name}'
-                os.remove(file_rec.path)
-                os.rename(real_file_path, zip_file_name)
-                logging.info(f'Start zipping file {file_rec.name}. Real path: {zip_file_name}')
-                zip_a_zipfile_with_progress(zip_file_name, file_rec.path)
-                os.remove(zip_file_name)
-                logging.info(
-                    f'Finished zipping file {file_rec.name} to {real_file_path} in {round(time.perf_counter() - start, 2)} seconds')
-
-            url_base = f"{self.target.base_url}/api/files/{file_id}/replace"
-            timeout_seconds = app_settings.get("DATAVERSE_RESPONSE_TIMEOUT", 360000)
-            logging.info(f'Start ingesting file {file_rec.name}. Size: {file_rec.size}. Ingest to {url_base}')
-            if file_rec.size < app_settings.get("MAX_INGEST_SIZE_USING_PYTHON", 100000000):
-                logging.info(f'Ingest SMALL FILE using python: {file_rec.name}')
-                with open(file_rec.path, 'rb') as f:
-                    files = {'file': (file_rec.name, f)}
-                    response_ingest_file = requests.post(url_base, files=files, data=data, headers=headers,
-                                                         timeout=timeout_seconds).json()
-                    logging.info(f'File {file_rec.name} is successfully ingested')
+        # print(json.dumps(dv_latest_version_json, indent=2))
+        files_in_dv_target = dv_latest_version_json["data"]["files"]
+        logging.info(f'Found {len(files_in_dv_target)} files in Remote Dataverse Target.')
+        # Re-ingest generated files
+        not_generated_file_in_dv_target = []
+        for file in files_in_dv_target:
+            jsonData = json.loads(str_dv_file).get(file["dataFile"]["filename"])
+            if "__generated__files" in file.get("categories", []):
+                dv_file_json[file["dataFile"]["filename"]]["processed"] = True
+                file_id = file["dataFile"]["id"]
+                file_rec = self.db_manager.find_file_by_name(self.dataset_id, file["dataFile"]["filename"])
+                self.replace_file_dv_target(file, file_id, file_rec, headers, pid, jsonData)
             else:
-                logging.info(f'Ingest LARGE FILE using script: {file_rec.name}')
-                logging.info("")
-                jsonData_str = json.dumps(jsonData)
-                try:
-                    output = f'{app_settings.DATA_TMP_BASE_DIR}/{self.app_name}/{self.dataset_id}/{str(uuid.uuid4().int)}.txt'
-                    logging.info(f'Output: {output}')
-                    result = subprocess.run(
-                        [app_settings.SHELL_SCRIPT_PATH, file_rec.path, url_base, jsonData_str, self.target.password,
-                         output],
-                        check=True, text=True, capture_output=True
-                    )
-                    logging.info(f'File {file_rec.name} is successfully ingested')
-                    logging.info(f'Response: {result.stdout}')
-                    response_ingest_file = json.loads(result.stdout)
-                except subprocess.CalledProcessError as e:
-                    logging.error(f'File {file_rec.name} is FAIL ingested')
-                    logging.error(f'Response: {e.stderr}')
-                    raise ValueError(str(e.stderr))
-                except Exception as e:
-                    logging.error(f'File {file_rec.name} is FAIL ingested')
-                    logging.error(f'Response: {e}')
-                    raise ValueError(str(e))
+                not_generated_file_in_dv_target.append(file)
 
-            logging.info(
-                f'Finish ingesting file {file_rec.name} to {pid} in {round(time.perf_counter() - start, 2)} seconds.')
-            # self.db_manager.set_file_ingested(file.id)
+        print(json.dumps(not_generated_file_in_dv_target, indent=2))
+        for file in not_generated_file_in_dv_target:
+            jsonData = json.loads(str_dv_file).get(file["dataFile"]["filename"])
+            file_id = file["dataFile"]["id"]
+            # Check whether file is deleted in the database
+            f_rec = self.db_manager.find_file_by_name(self.dataset_id, file["dataFile"]["filename"])
+            if not f_rec:
+                logging.info(f'File {file["dataFile"]["filename"]} is deleted in the database. So delete in Dataverse')
+                delete_response = requests.delete(f'{self.target.base_url}/api/files/{file["dataFile"]["id"]}', headers=headers)
+                logging.info(
+                    f"delete_response.status_code: {delete_response.status_code} delete_response.text: {delete_response.text}")
+            else:
+                #update the dv_file_json
+                dv_file_json[file["dataFile"]["filename"]]["processed"] = True
+                logging.info(f'File {file["dataFile"]["filename"]} is not deleted in the database. So, check whether it is updated')
+                # Check whether file is updated
+                if f_rec.size != file["dataFile"]["filesize"] or f_rec.checksum != file["dataFile"]["checksum"]["value"]:
+                    logging.info(f'File {file["dataFile"]["filename"]} is updated in the database. So re-ingest it')
+                    # Re-ingest the file
+                    self.replace_file_dv_target(file, file_id, file_rec, headers, pid, jsonData)
+                else:
+                    # Update only the file metadata
+                    pass
+                    #TODO: CHECK UPDATE METADATA
+                    # data = {"jsonData": json.dumps(jsonData)}
+                    # url_base = f"{self.target.base_url}/api/files/{file_id}/metadata"
+                    # headers["Content-Type"] = "application/json"
+                    # print(headers)
+                    # print(data)
+                    # response_update_file = requests.post(url_base,  data=data, headers=headers)
+                    # if response_update_file.status_code != status.HTTP_200_OK:
+                    #     logging.error(f'File {file_rec.name} is FAIL metadata updated. Response: {response_update_file.reason}')
+                    #     # raise ValueError(response_update_file.json())
+                    # logging.info(f'File {file_rec.name} is successfully metadata updated')
 
-            if jsonData.get('embargo'):
-                json_data = {
-                    'dateAvailable': jsonData.get('embargo'),
-                    'reason': '',
-                    'fileIds': [response_ingest_file['data']['files'][0]['dataFile']['id']],
-                }
-                response_embargo = requests.post(
-                    f'{self.target.base_url}/api/datasets/:persistentId/files/actions/:set-embargo?persistentId={pid}',
-                    headers=headers, json=json_data)
-                if response_embargo.status_code != status.HTTP_200_OK:
-                    raise ValueError(response_embargo.text)
+        #now ingest new files
+        for file_element in dv_file_json:
+            already_processed = dv_file_json[file_element].get("processed", False)
+            if not already_processed:
+                file_rec = self.db_manager.find_file_by_name(self.dataset_id, file_element)
+                if file_rec:
+                    logging.info(f'File {file_element} is not ingested. So ingest it')
+                    jsonData = json.loads(str_dv_file).get(file_element)
+                    data = {"jsonData": json.dumps(jsonData)}
+                    print(f"jsonData: {jsonData}")
+                    url_base = f"{self.target.base_url}/api/datasets/:persistentId/add?persistentId={pid}"
+                    print(f"url_base: {url_base}")
+                    with open(file_rec.path, 'rb') as f:
+                        print(f"file_rec.path: {file_rec.path}")
+                        print(f"file_rec.name: {file_rec.name}")
+                        print(f"headers: {headers}")
+                        files = {'file': (file_rec.name, f)}
+                        response_ingest_file = requests.post(url_base, files=files, data=data, headers=headers,
+                                                             timeout=app_settings.get("DATAVERSE_RESPONSE_TIMEOUT",
+                                                                                      360000))
+                        if response_ingest_file.status_code != status.HTTP_200_OK:
+                            logging.error(f'File {file_rec.name} is FAIL ingested. Response: {response_ingest_file.json()}')
+                            raise ValueError(response_ingest_file.json())
+
+                        logging.info(f'File {file_rec.name} is successfully ingested. Response: {response_ingest_file.json()}')
+
+
+    def replace_file_dv_target(self, file, file_id, file_rec, headers, pid, jsonData):
+        start = time.perf_counter()
+        jsonData["forceReplace"] = True
+        data = {"jsonData": json.dumps(jsonData)}
+        url_base = f"{self.target.base_url}/api/files/{file_id}/replace"
+        timeout_seconds = app_settings.get("DATAVERSE_RESPONSE_TIMEOUT", 360000)
+        logging.info(f'Start ingesting file {file_rec.name}. Size: {file_rec.size}. Ingest to {url_base}')
+        with open(file_rec.path, 'rb') as f:
+            files = {'file': (file_rec.name, f)}
+            response_ingest_file = requests.post(url_base, files=files, data=data, headers=headers,
+                                                 timeout=timeout_seconds)
+            if response_ingest_file.status_code != status.HTTP_200_OK:
+                logging.error(f'File {file_rec.name} is FAIL ingested. Response: {response_ingest_file.json()}')
+                raise ValueError(response_ingest_file.json())
+        logging.info(
+            f'Finish ingesting file {file_rec.name} to {pid} in {round(time.perf_counter() - start, 2)} seconds.')
 
 
     def __ingest_files(self, pid: str, str_updated_metadata_json: str, headers) -> int:
