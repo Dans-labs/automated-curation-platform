@@ -1,6 +1,6 @@
 [project]
 name = "automated-curation-platform"
-version = "0.1.9-dev"
+version = "0.2.1-dev"
 description = "The ACP was designed to streamline and automate the entire process of deposit package creation, addressing the unique needs of diverse repositories by organizing, filtering, and selecting data accordingly. Leveraging advanced algorithms, machine learning techniques, and predefined rule sets, ACP performs complex curation tasks autonomously, greatly reducing or even eliminating the need for manual input. These automated tasks encompass data gathering, tagging, sorting, and content analysis, which collectively improve efficiency and accuracy."
 authors = [
     {name = "Eko Indarto", email = "eko.indarto@dans.knaw.nl"}

@@ -562,24 +562,25 @@ class DatabaseManager:
                 session.commit()
                 session.refresh(metadata_content_record)
 
-    def update_target_repo_deposit_status(self, target_repo: TargetRepo) -> type(None):
+    def update_target_repo_deposit_status(self, target_repo: TargetRepo) -> None:
         with Session(self.engine) as session:
-            statement = select(TargetRepo).where(TargetRepo.dataset_id == target_repo.dataset_id,
-                                                 TargetRepo.name == target_repo.name)
-            results = session.exec(statement)
-            target_repo_record = results.one_or_none()
-            if target_repo:
-                target_repo_record.deposit_status = target_repo.deposit_status
-                target_repo_record.deposited_version = target_repo.deposited_version
-                target_repo_record.deposited_identifiers = target_repo.deposited_identifiers
-                if target_repo.target_service_response:
-                    target_repo_record.target_service_response = target_repo.target_service_response
-                target_repo_record.deposited_at = datetime.now(timezone.utc)
-                target_repo_record.deposit_duration = target_repo.deposit_duration
-                # target_repo_record.encrypt_config(self.cipher_suite)
-                session.add(target_repo_record)
+            target_repo_rec = session.exec(
+                select(TargetRepo).where(
+                    TargetRepo.dataset_id == target_repo.dataset_id,
+                    TargetRepo.name == target_repo.name
+                )
+            ).one_or_none()
+
+            if target_repo_rec:
+                target_repo_rec.deposit_status = target_repo.deposit_status
+                target_repo_rec.deposited_version = target_repo.deposited_version or target_repo_rec.deposited_version
+                target_repo_rec.deposited_identifiers = target_repo.deposited_identifiers or target_repo_rec.deposited_identifiers
+                target_repo_rec.target_service_response = target_repo.target_service_response or target_repo_rec.target_service_response
+                target_repo_rec.deposited_at = datetime.now(timezone.utc)
+                target_repo_rec.deposit_duration = target_repo.deposit_duration
+
+                session.add(target_repo_rec)
                 session.commit()
-                session.refresh(target_repo_record)
 
 
 

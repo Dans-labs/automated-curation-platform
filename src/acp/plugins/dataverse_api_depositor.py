@@ -219,12 +219,12 @@ class DataverseIngester(Bridge):
                 # raise ValueError(f"Error: Transformer '{json_data_name}' not found or more than one transformer")
             if metadata_type == MetadataType.XML:
                 str_dv_metadata = transform_xml(
-                    transformer_url=transformer[0].transformer_url,
+                    transformer_url=f'{transformer[0].transformer_url}?app_name={self.app_name}',
                     str_tobe_transformed=str_updated_metadata_json
                 )
             elif metadata_type == MetadataType.JSON:
                 str_dv_metadata = transform(
-                    transformer_url=transformer[0].transformer_url,
+                    transformer_url=f'{transformer[0].transformer_url}?app_name={self.app_name}',
                     str_tobe_transformed=str_updated_metadata_json
                 )
 
@@ -248,7 +248,7 @@ class DataverseIngester(Bridge):
         for tm in self.target.metadata.transformed_metadata:
             if tm.generate_file:
                 gf_path = os.path.join(self.dataset_dir, tm.name)
-                content = transform(tm.transformer_url,
+                content = transform(f'{tm.transformer_url}?app_name={self.app_name}',
                                     self.dataset_rec.metadata_content) if tm.transformer_url else self.dataset_rec.metadata_content
                 with open(gf_path, "wt") as f:
                     f.write(content)
@@ -315,7 +315,9 @@ class DataverseIngester(Bridge):
                     self.replace_file_dv_target(file, file_id, file_rec, headers, pid, jsonData)
                 else:
                     # Update only the file metadata
-                    pass
+                    logging.warning(f'Dataverse bug? De Dataverse update metadata file is not working.'
+                                    f' So, file {file["dataFile"]["filename"]} is not updated in the database.')
+
                     #TODO: CHECK UPDATE METADATA
                     # data = {"jsonData": json.dumps(jsonData)}
                     # url_base = f"{self.target.base_url}/api/files/{file_id}/metadata"

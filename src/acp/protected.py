@@ -220,16 +220,27 @@ async def delete_dataset_metadata(request: Request, dataset_id: str, status: Opt
     """
     logging.info(f'Delete dataset: {dataset_id}')
 
-    repo_assistant = await get_repo_assistant(request)
-    app_name = repo_assistant.app_name
-    db_manager = data[app_name]
-    dataset = db_manager.find_dataset_by_id(dataset_id)
     user_id = request.headers.get('user-id')
     if not user_id:
         raise HTTPException(status_code=401, detail='No user id provided')
 
+    repo_assistant = await get_repo_assistant(request)
+    app_name = repo_assistant.app_name
+    db_manager = data[app_name]
+    dataset = db_manager.find_dataset_by_id(dataset_id)
+
     if dataset.id not in db_manager.find_dataset_ids_by_owner(user_id):
         raise HTTPException(status_code=404, detail='No Dataset found')
+
+    if dataset.status == StateVersion.DRAFT_RESUBMIT:
+        # Back to the original after last submitted
+        # TODO: Currently, it works only for one target.
+        target_repo = db_manager.find_target_repo(dataset_id=dataset.id, target_name=repo_assistant.targets[0].repo_name)
+        deposit_source = json.loads(target_repo.target_service_response)['deposit_source']
+        dataset.metadata_content = deposit_source
+        dataset.status = StateVersion.SUBMITTED
+        db_manager.update_dataset(dataset)
+        return delete_dataset_and_its_folder(db_manager, dataset.id, app_name, False)
 
     target_repos = db_manager.find_target_repos_by_dataset_id(
         dataset_id=dataset.id, status_not_in=[StateVersion.SUBMITTED, StateVersion.RESUBMIT, StateVersion.DRAFT_RESUBMIT])
@@ -251,7 +262,7 @@ async def delete_dataset_metadata(request: Request, dataset_id: str, status: Opt
     raise HTTPException(status_code=404, detail=f'Delete of {dataset.id} is not allowed.')
 
 
-def delete_dataset_and_its_folder(db_manager, dataset_id, app_name):
+def delete_dataset_and_its_folder(db_manager, dataset_id: str, app_name: str, delete_dataset: bool = True) -> {}:
     """
     Delete a dataset and its associated folder.
 
@@ -271,7 +282,10 @@ def delete_dataset_and_its_folder(db_manager, dataset_id, app_name):
         delete_symlink_and_target(dataset_folder)
     else:
         logging.info(f'Dataset folder: {dataset_folder} not found')
-    db_manager.delete_by_dataset_id(dataset_id)
+    if delete_dataset:
+        logging.info(f'Delete dataset: {dataset_id}')
+        db_manager.delete_by_dataset_id(dataset_id)
+
     if os.path.exists(dataset_folder):
         logging.info(f'Delete dataset folder: {dataset_folder}')
         shutil.rmtree(dataset_folder)
@@ -887,7 +901,7 @@ async def create_dataset_form(url: str, req: Request):
             if diff:
                 raise HTTPException(status_code=501,
                                     detail=f"Dataset {persistent_id} has changed on the server. Not implemented yet")
-            public_url = f"http://localhost:10124/dataset/{target_repo_rec.dataset_id}"
+            return {"dataset-id": target_repo_rec.dataset_id}
         else:
             public_url = f"http://localhost:10124/dataset/{target_repo_rec.dataset_id}"
 
