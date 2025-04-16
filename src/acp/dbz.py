@@ -18,15 +18,22 @@ from typing import Optional, List
 from enum import Enum
 from sqlalchemy.orm import selectinload
 
+from contextlib import contextmanager
+from sqlmodel import Session
+
+@contextmanager
+def db_session(engine):
+    session = Session(engine)
+    try:
+        yield session
+    finally:
+        session.close()
+
 class StateVersion(StrEnum):
     DRAFT = 'DRAFT'
-    PUBLISH = 'PUBLISH'
-    PUBLISHED = 'PUBLISHED'
-    PUBLISHING = 'PUBLISHING'
     SUBMIT = 'SUBMIT'
     SUBMITTED = 'SUBMITTED'
     RESUBMIT = 'RESUBMIT'
-    RESUBMITTED = 'RESUBMITTED'
     FAILED = 'FAILED'
     DRAFT_RESUBMIT =  "DRAFT-RESUBMIT"
 
@@ -231,7 +238,7 @@ class DatabaseManager:
             submission_ready=False
         )
         dataset.encrypt_metadata_content(self.cipher_suite)
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             session.add(dataset)
             session.commit()
             session.refresh(dataset)
@@ -245,7 +252,7 @@ class DatabaseManager:
         for tr in repo_records:
             tr.encrypt_config(self.cipher_suite)
 
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             # Query the maximum ID from the Dataset table
             max_id = session.exec(select(func.max(Dataset.id))).one_or_none()
             new_id = (max_id or 0) + 1  # Increment max_id by 1, default to 1 if max_id is None
@@ -264,7 +271,7 @@ class DatabaseManager:
 
     def insert_datafiles(self, dataset_id, file_records: [DataFile]) -> None:
         try:
-            with Session(self.engine) as session:
+            with db_session(self.engine) as session:
                 for file_record in file_records:
                     file_record.dataset_id = dataset_id
                     session.add(file_record)
@@ -281,20 +288,20 @@ class DatabaseManager:
 
 
     def delete_datafile(self,dataset_id: str, filename: str) -> None:
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             file_record = session.exec(select(DataFile).where(DataFile.dataset_id == dataset_id, DataFile.name == filename)).one_or_none()
             if file_record:
                 session.delete(file_record)
                 session.commit()
 
     def delete_all(self) -> dict:
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             tabs = {cls.__qualname__: session.exec(delete(cls)).rowcount for cls in [DataFile, TargetRepo, Dataset]}
             session.commit()
         return tabs
 
     def delete_by_dataset_id(self,dataset_id: str) -> type(int):
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             ds = session.exec(select(Dataset).where(Dataset.id == dataset_id)).one_or_none()
             if ds:
                 # Delete DataFiles and TargetRepos in a single transaction
@@ -308,7 +315,7 @@ class DatabaseManager:
             return 0
 
     def find_draft_dataset(self, dataset: Dataset) -> Dataset:
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             query = select(Dataset).where(
                 and_(
                     Dataset.id == dataset.id,
@@ -318,7 +325,7 @@ class DatabaseManager:
             return session.exec(query).first()
 
     def find_dataset_by_id(self, dataset_id: str) -> Optional[Dataset]:
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             statement = select(Dataset).where(Dataset.id == dataset_id).options(
                 selectinload(Dataset.target_repos),
                 selectinload(Dataset.data_files)
@@ -344,7 +351,7 @@ class DatabaseManager:
             return dataset
 
     def find_dataset_only_by_id(self, dataset_id: str) -> Optional[Dataset]:
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             statement = select(Dataset).where(Dataset.id == dataset_id)
             dataset = session.exec(statement).one_or_none()
 
@@ -366,7 +373,7 @@ class DatabaseManager:
 
             return dataset
     def find_target_repo(self,dataset_id: str, target_name: str) -> TargetRepo:
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             target_repo = session.exec(
                 select(TargetRepo).where(TargetRepo.dataset_id == dataset_id, TargetRepo.name == target_name)).one_or_none()
             if target_repo:
@@ -374,7 +381,7 @@ class DatabaseManager:
             return target_repo
 
     def find_dataset_and_targets(self, dataset_id: str, exclude_target=False) -> Asset:
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             dataset = session.exec(select(Dataset).where(Dataset.id == dataset_id)).one_or_none()
             if dataset:
                 dataset.decrypt_metadata_content(self.cipher_suite)
@@ -409,7 +416,7 @@ class DatabaseManager:
 
 
     def find_dataset_and_targets_by_dataset_id(self,dataset_id: str) -> Asset:
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             dataset = session.exec(select(Dataset).where(Dataset.id == dataset_id)).one_or_none()
             if dataset:
                 dataset.decrypt_metadata_content(self.cipher_suite)
@@ -440,7 +447,7 @@ class DatabaseManager:
 
     # TODO: CHECK THIS
     def find_dataset_ids_by_owner(self, owner_id: str) -> [TargetRepo]:
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             statement = select(Dataset.id).where(Dataset.owner_id == owner_id)
             results = session.exec(statement)
             result = results.all()
@@ -460,7 +467,7 @@ class DatabaseManager:
         Returns:
             List[TargetRepo]: A list of TargetRepo objects for the specified owner, ordered by dataset ID.
         """
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             statement = (
                 select(Dataset)
                 .where(Dataset.owner_id == owner_id)
@@ -474,7 +481,7 @@ class DatabaseManager:
 
     def find_target_repos_by_dataset_id(self,dataset_id: str, status_not_in: [StateVersion]) -> [TargetRepo]:
         #Note: Dataset.status not in status
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             statement = (
                 select(TargetRepo)
                 .join(Dataset, TargetRepo.dataset_id == Dataset.id)
@@ -488,35 +495,35 @@ class DatabaseManager:
             return target_repos
 
     def find_uploaded_files(self,dataset_id: str) -> [DataFile]:
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             statement = select(DataFile).where(DataFile.dataset_id == dataset_id, DataFile.state == DataFileState.UPLOADED)
             results = session.exec(statement)
             result = results.all()
         return result
 
     def find_file_by_name(self,dataset_id: str, file_name: str) -> [DataFile]:
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             statement = select(DataFile).where(DataFile.dataset_id == dataset_id, DataFile.name == file_name)
             results = session.exec(statement)
             result = results.one_or_none()
         return result
 
     def find_files(self,dataset_id: str) -> [DataFile]:
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             statement = select(DataFile).where(DataFile.dataset_id == dataset_id)
             results = session.exec(statement)
             result = results.all()
         return result
 
     def find_registered_files(self,dataset_id: str) -> [DataFile]:
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             statement = select(DataFile).where(DataFile.dataset_id == dataset_id, DataFile.state == DataFileState.REGISTERED)
             results = session.exec(statement)
             result = results.all()
         return result
 
     def find_non_registered_files(self, dataset_id: str) -> [DataFile]:
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             statement = select(DataFile).where(DataFile.dataset_id == dataset_id, DataFile.state != DataFileState.REGISTERED)
             results = session.exec(statement)
             result = results.all()
@@ -525,7 +532,7 @@ class DatabaseManager:
     # TODO: REFACTOR - CHANGE THE NAME
     def execute_l(self,dataset_id: str) -> Any:
         rst = []
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             statement = select(DataFile.name).where(DataFile.dataset_id == dataset_id,
                                                     DataFile.state == DataFileState.UPLOADED)
             results = session.exec(statement).all()
@@ -533,7 +540,7 @@ class DatabaseManager:
         return rst
 
     def update_dataset(self, dataset: Dataset) -> Dataset:
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             statement = select(Dataset).where(Dataset.id == dataset.id)
             results = session.exec(statement)
             ds_record = results.one_or_none()
@@ -551,7 +558,7 @@ class DatabaseManager:
         return ds_record
 
     def set_dataset_ready_for_ingest(self,dataset_id: str, submission_ready: bool = False) -> type(None):
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             statement = select(Dataset).where(Dataset.id == dataset_id)
             results = session.exec(statement)
             metadata_content_record = results.one_or_none()
@@ -563,7 +570,7 @@ class DatabaseManager:
                 session.refresh(metadata_content_record)
 
     def update_target_repo_deposit_status(self, target_repo: TargetRepo) -> None:
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             target_repo_rec = session.exec(
                 select(TargetRepo).where(
                     TargetRepo.dataset_id == target_repo.dataset_id,
@@ -585,7 +592,7 @@ class DatabaseManager:
 
 
     def submitted_now(self,dataset_id: str) -> type(None):
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             statement = select(Dataset).where(Dataset.id == dataset_id)
             results = session.exec(statement)
             metadata_content_record = results.one_or_none()
@@ -597,7 +604,7 @@ class DatabaseManager:
                 session.refresh(metadata_content_record)
 
     def update_file(self, df: DataFile) -> type(None):
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             statement = select(DataFile).where(DataFile.dataset_id == df.dataset_id, DataFile.name == df.name)
             results = session.exec(statement)
             f_record = results.one_or_none()
@@ -613,7 +620,7 @@ class DatabaseManager:
                 session.refresh(f_record)
 
     def update_file_access_level(self, dataset_id: str, filename: str, access_level: AccessLevel) -> type(None):
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             statement = select(DataFile).where(DataFile.dataset_id == dataset_id, DataFile.name == filename)
             results = session.exec(statement)
             f_record = results.one_or_none()
@@ -624,7 +631,7 @@ class DatabaseManager:
                 session.refresh(f_record)
 
     def replace_targets_record(self, dataset_id: str, target_repo_records: [TargetRepo]) -> type(None):
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             statement = select(TargetRepo).where(TargetRepo.dataset_id == dataset_id)
             results = session.exec(statement)
             trs = results.fetchall()
@@ -639,20 +646,20 @@ class DatabaseManager:
 
 
     def is_dataset_ready(self,dataset_id: str) -> bool:
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             dataset_id_rec = session.exec(
                 select(Dataset.id).where((Dataset.id == dataset_id) & Dataset.submission_ready &  (Dataset.status.notin_([StateVersion.DRAFT, StateVersion.DRAFT_RESUBMIT])))).one_or_none()
             return dataset_id_rec is not None
 
     def are_files_uploaded(self,dataset_id: str) -> bool:
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             results = session.exec(select(DataFile).where(DataFile.dataset_id == dataset_id,
                                                           DataFile.state == DataFileState.REGISTERED)).all()
 
         return len(results) == 0
 
     def update_dataset_status(self, dataset_id: str, state: StateVersion) -> type(None):
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             statement = select(Dataset).where(Dataset.id == dataset_id)
             results = session.exec(statement)
             ds_record = results.one_or_none()
@@ -663,7 +670,7 @@ class DatabaseManager:
                 session.refresh(ds_record)
 
     def delete_generated_files(self,dataset_id: str) -> type(None):
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             statement = select(DataFile).where(DataFile.dataset_id == dataset_id, DataFile.state == DataFileState.GENERATED)
             results = session.exec(statement)
             for file_record in results.all():
@@ -672,7 +679,7 @@ class DatabaseManager:
 
     def find_target_repo_by_indentifier(self, doi: str) -> Optional[TargetRepo]:
         print("doi:", doi)
-        with Session(self.engine) as session:
+        with db_session(self.engine) as session:
             statement = select(TargetRepo).where(TargetRepo.deposited_identifiers.contains(doi))
             results = session.exec(statement)
             result = results.one_or_none()
