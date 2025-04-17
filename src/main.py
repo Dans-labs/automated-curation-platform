@@ -39,7 +39,7 @@ from keycloak import KeycloakOpenID, KeycloakAuthenticationError
 from starlette import status
 from starlette.middleware.cors import CORSMiddleware
 
-from src.acp import protected, public, protected_admin
+from src.acp.api import protected, protected_admin, public
 from src.acp.commons import app_settings, data, inspect_bridge_plugin, \
     get_version, get_name, project_details, get_db_manager, retrieve_apps_list
 from src.acp.tus_files import upload_files
