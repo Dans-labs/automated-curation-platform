@@ -25,7 +25,7 @@ from jsoncomparison import Compare
 from requests_toolbelt.multipart.encoder import MultipartEncoder, MultipartEncoderMonitor
 from starlette import status
 
-from src.acp.dbz import DatabaseManager, DepositStatus, StateVersion, DatasetStatus
+from src.acp.db.dbz import DatabaseManager, DepositStatus, StateVersion, DatasetStatus
 from src.acp.models.app_model import Asset, TargetApp
 from src.acp.models.assistant_datamodel import ProcessedMetadata, RepoAssistantDataModel
 from src.acp.models.bridge_output_model import TargetDataModel, TargetResponse
@@ -61,20 +61,13 @@ assistant_repo_headers = {
     'Authorization': f'Bearer {app_settings.ACP_CONFIG_ASSISTANT_SERVICE_API_KEY}'
 }
 
-def get_version():
-    """
-    Retrieves the version of the package from the `pyproject.toml` file.
-
-    This function opens the `pyproject.toml` file located in the base directory of the project,
-    reads its contents, and returns the version of the package as specified under the `[tool.poetry]` section.
-
-    Returns:
-    str: The version of the package.
-    """
+def get_version() -> str:
+    """Retrieve the version of the package."""
     return project_details['version']
 
 
-def get_name():
+def get_name() -> str:
+    """Retrieve the name of the package."""
     return project_details['name']
 
 
@@ -740,22 +733,16 @@ async def create_asset(dataset, db_manager, target_creds):
         asset.targets.append(target_app)
     return asset
 
-
 def validate_json(str_dv_metadata):
+    try:
+        json.loads(str_dv_metadata)
+    except json.JSONDecodeError as e:
+        logging.error(f"Initial JSON decode error: {e}")
+        # Remove invalid control characters and retry
+        str_dv_metadata = re.sub(r'[\x00-\x1F\x7F]', '', str_dv_metadata)
         try:
             json.loads(str_dv_metadata)
         except json.JSONDecodeError as e:
-            logging.error(f"Error: {e}")
-            str_dv_metadata = re.sub(r'[\x00-\x1F\x7F]', '', str_dv_metadata)
-            try:
-                json.loads(str_dv_metadata)
-            except json.JSONDecodeError as e:
-                logging.error(f"Error: {e}")
-                return None
-            except Exception as e:
-                logging.error(f"Error: {e}")
-                return None
-        except Exception as e:
-            logging.error(f"Error: {e}")
+            logging.error(f"Retry JSON decode error: {e}")
             return None
-        return str_dv_metadata
+    return str_dv_metadata

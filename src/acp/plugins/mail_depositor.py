@@ -5,7 +5,7 @@ import urllib
 
 from src.acp.bridge import Bridge
 from src.acp.commons import send_mail
-from src.acp.dbz import DepositStatus
+from src.acp.db.dbz import DepositStatus
 from src.acp.models.bridge_output_model import TargetDataModel
 
 

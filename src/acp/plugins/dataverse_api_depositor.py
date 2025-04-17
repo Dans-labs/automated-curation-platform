@@ -2,12 +2,10 @@ import json
 import logging
 import mimetypes
 import os
-import re
 import subprocess
 import time
 import uuid
 from datetime import datetime, timezone
-from wsgiref import headers
 
 import jmespath
 import requests
@@ -19,9 +17,9 @@ from src.acp.commons import (
     app_settings,
     transform,
     handle_deposit_exceptions, dmz_dataverse_headers, zip_a_zipfile_with_progress, transform_xml,
-    processed_metadata_handler, db_manager, validate_json
+    processed_metadata_handler, validate_json
 )
-from src.acp.dbz import StateVersion, DataFile, DepositStatus, MetadataType, AccessLevel, DataFileState
+from src.acp.db.dbz import StateVersion, DataFile, DepositStatus, MetadataType, AccessLevel, DataFileState
 from src.acp.models.bridge_output_model import IdentifierItem, IdentifierProtocol, TargetResponse, ResponseContentType
 
 
@@ -92,7 +90,6 @@ class DataverseIngester(Bridge):
 
             str_updated_metadata = json.dumps(md_json, indent=4)
             self.dataset_rec.metadata_content = str_updated_metadata
-            tdm.deposit_source = md_json
 
             self.db_manager.update_dataset(self.dataset_rec)
         else:

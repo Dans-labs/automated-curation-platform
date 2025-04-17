@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
 from src.acp.commons import app_settings
-from src.acp.dbz import TargetRepo, DepositStatus, Dataset, DataFile, DatabaseManager
+from src.acp.db.dbz import TargetRepo, DepositStatus, Dataset, DataFile, DatabaseManager
 from src.acp.models.assistant_datamodel import Target
 from src.acp.models.bridge_output_model import TargetDataModel
 

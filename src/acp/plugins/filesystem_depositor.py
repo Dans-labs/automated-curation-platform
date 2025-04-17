@@ -6,7 +6,7 @@ import os
 import urllib.parse
 
 from src.acp.bridge import Bridge
-from src.acp.dbz import DepositStatus
+from src.acp.db.dbz import DepositStatus
 from src.acp.models.bridge_output_model import TargetDataModel
 
 

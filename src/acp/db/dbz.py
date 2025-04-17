@@ -2,13 +2,14 @@ import base64
 import json
 import logging
 import os
+import sqlite3
 from datetime import datetime, timezone
 from enum import StrEnum, auto, Enum
 from typing import Any, List, Optional
 from contextlib import contextmanager
 
 from cryptography.fernet import Fernet
-from sqlalchemy import delete, inspect, func, and_
+from sqlalchemy import delete, inspect, func, and_, text
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import (SQLModel, Field, Relationship, create_engine, Session,
                       select)
@@ -166,6 +167,14 @@ class DataFile(SQLModel, table=True):
 
     dataset: Optional["Dataset"] = Relationship(back_populates="data_files")
 
+class DatasetBackup(SQLModel, table=True):
+    __tablename__ = "dataset_backups"
+
+    backup_id: int = Field(default=None, primary_key=True)
+    dataset_id: str = Field(foreign_key="dataset.id", index=True)
+    backup_timestamp: datetime = Field(nullable=False)
+    table_name: str = Field(nullable=False)
+    record_data: str = Field(nullable=False)
 
 class DatabaseManager:
     def __init__(self, db_dialect: str, db_url: str, encryption_key: str, app_name: str = ""):
@@ -546,3 +555,184 @@ class DatabaseManager:
             return session.exec(
                 select(TargetRepo).where(TargetRepo.deposited_identifiers.contains(doi))
             ).one_or_none()
+
+    from sqlalchemy import text
+
+    def backup_dataset_by_id(self, dataset_id):
+        """
+        Backup all rows related to a specific dataset ID to a backup table.
+
+        Args:
+            dataset_id (str): The dataset ID to backup
+        """
+        backup_time = datetime.now()
+        with db_session(self.engine) as session:
+            try:
+                # Check if dataset_id already exists in dataset_backups
+                existing_backup = session.exec(
+                    select(DatasetBackup).where(DatasetBackup.dataset_id == dataset_id)
+                ).first()
+
+                if existing_backup:
+                    logging.info(f"Backup for dataset {dataset_id} already exists. Skipping backup.")
+                    return
+
+                # Backup dataset table
+                statement = select(Dataset).where(Dataset.id == dataset_id)
+                dataset_row = session.exec(statement).one_or_none()
+
+                if not dataset_row:
+                    raise ValueError(f"No dataset found with ID: {dataset_id}")
+
+                # Convert row to JSON string
+                record_data = dataset_row.model_dump_json()
+                backup_record = DatasetBackup(
+                    dataset_id=dataset_id,
+                    backup_timestamp=backup_time,
+                    table_name='dataset',
+                    record_data=record_data
+                )
+                session.add(backup_record)
+                session.commit()
+
+                # Backup target_repo records
+                statement = select(TargetRepo).where(TargetRepo.dataset_id == dataset_id)
+                target_repo_rows = session.exec(statement).all()
+
+                for row in target_repo_rows:
+                    record_data = row.model_dump_json()
+                    backup_record = DatasetBackup(
+                        dataset_id=dataset_id,
+                        backup_timestamp=backup_time,
+                        table_name='target_repo',
+                        record_data=record_data  # Serialize dictionary to JSON string
+                    )
+                    session.add(backup_record)
+
+                session.commit()
+
+                # Backup data_file records
+                statement = select(DataFile).where(DataFile.dataset_id == dataset_id)
+                data_file_rows = session.exec(statement).all()
+
+                for row in data_file_rows:
+                    record_data =row.model_dump_json()
+                    backup_record = DatasetBackup(
+                        dataset_id=dataset_id,
+                        backup_timestamp=backup_time,
+                        table_name='data_file',
+                        record_data=record_data  # Serialize dictionary to JSON string
+                    )
+                    session.add(backup_record)
+
+                session.commit()
+                print(f"Backup successfully created in database for dataset {dataset_id}")
+
+            except Exception as e:
+                session.rollback()
+                raise e
+
+    def restore_from_backup(self, dataset_id):
+        """
+        Restore a dataset from the backup table and clean up the backup records
+
+        Args:
+            dataset_id (str): The dataset ID to restore
+        """
+
+        with db_session(self.engine) as session:
+            try:
+                # Get the backup records and identify which ones we're working with
+                statement = (
+                    select(DatasetBackup)
+                    .where(DatasetBackup.dataset_id == dataset_id)
+                    .where(
+                        DatasetBackup.backup_timestamp == (
+                            select(func.max(DatasetBackup.backup_timestamp))
+                            .where(DatasetBackup.dataset_id == dataset_id)
+                        )
+                    )
+                )
+                backup_records = session.exec(statement).all()
+
+                # First collect all backup records before modifying anything
+                if not backup_records:
+                    raise ValueError(f"No backup records found for dataset {dataset_id}")
+
+                # Delete existing records in target tables
+                session.exec(delete(DataFile).where(DataFile.dataset_id == dataset_id))
+                session.exec(delete(TargetRepo).where(TargetRepo.dataset_id == dataset_id))
+                session.exec(delete(Dataset).where(Dataset.id == dataset_id))
+                session.commit()
+
+                # Restore records from backup
+                restored_counts = {'dataset': 0, 'target_repo': 0, 'data_file': 0}
+                for backup_record in backup_records:
+                    table_name = backup_record.table_name
+                    try:
+                        record_data = json.loads(backup_record.record_data)
+                        # Convert datetime fields
+                        if table_name == 'dataset':
+                            record_data["created_at"] = datetime.fromisoformat(record_data["created_at"])
+                            record_data["saved_at"] = datetime.fromisoformat(record_data["saved_at"])
+                            record_data["submitted_at"] = datetime.fromisoformat(record_data["submitted_at"])
+                        elif table_name == 'target_repo':
+                            record_data["deposited_at"] = datetime.fromisoformat(record_data["deposited_at"])
+                        else:
+                            record_data["added_at"] = datetime.fromisoformat(record_data["added_at"])
+
+                    except Exception as e:
+                        print(f"Error parsing record data for {table_name}: {e}")
+                        continue
+
+                    # Map table names to SQLModel classes
+                    table_mapping = {
+                        'dataset': Dataset,
+                        'target_repo': TargetRepo,
+                        'data_file': DataFile
+                    }
+
+                    model_class = table_mapping.get(table_name)
+                    if not model_class:
+                        print(f"Unknown table name: {table_name}")
+                        continue
+
+                    # Create an instance of the model class
+                    try:
+                        record_instance = model_class(**record_data)
+                        session.add(record_instance)
+                        session.commit()
+                        restored_counts[table_name] += 1
+                    except IntegrityError as e:
+                        print(f"Skipping duplicate record for {table_name}: {e}")
+                        session.rollback()
+                        continue
+
+                # Verify we restored required records (dataset and target_repo are required)
+                if restored_counts['dataset'] == 0:
+                    raise ValueError("Failed to restore the main dataset record")
+                if restored_counts['target_repo'] == 0:
+                    print("Warning: No target_repo records restored")  # Change to raise ValueError if required
+
+                # Only if restoration succeeded do we delete the backups
+                statement = (
+                    delete(DatasetBackup)
+                    .where(DatasetBackup.dataset_id == dataset_id)
+                    .where(
+                        DatasetBackup.backup_timestamp == (
+                            select(func.max(DatasetBackup.backup_timestamp))
+                            .where(DatasetBackup.dataset_id == dataset_id)
+                        )
+                    )
+                )
+                session.exec(statement)
+                session.commit()
+                print(f"Successfully restored dataset {dataset_id} and cleaned up backup records")
+                print(f"Records restored: Dataset: {restored_counts['dataset']}, "
+                      f"Target Repo: {restored_counts['target_repo']}, "
+                      f"Data Files: {restored_counts['data_file']}")
+
+            except Exception as e:
+                session.rollback()
+                print(f"Restoration failed - all changes reverted: {e}")
+                raise e

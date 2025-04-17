@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Callable, Awaitable, Optional
 
 import requests
-import httpx
 import jmespath
 from fastapi import APIRouter, Request, HTTPException
 
@@ -22,9 +21,9 @@ from src.acp.commons import (app_settings, data,
                              get_class, handle_ps_exceptions, \
                              send_mail, delete_symlink_and_target, retrieve_targets_configuration, get_repo_assistant,
                              create_asset, compare_dv_json, dmz_dataverse_headers, base_dir)
-from src.acp.dbz import TargetRepo, DataFile, Dataset, StateVersion, DepositStatus, \
-    DatasetWorkState, MetadataType, AccessLevel, DataFileState
-from src.acp.models.app_model import ResponseDataModel, InboxDatasetDataModel, TargetApp
+from src.acp.db.dbz import TargetRepo, DataFile, Dataset, StateVersion, DepositStatus, \
+    MetadataType, AccessLevel, DataFileState
+from src.acp.models.app_model import ResponseDataModel, InboxDatasetDataModel
 # Import custom plugins and classes
 from src.acp.models.assistant_datamodel import RepoAssistantDataModel, Target
 from src.acp.models.bridge_output_model import TargetsCredentialsModel
@@ -147,7 +146,7 @@ async def process_inbox(status, request):
     if status in [StateVersion.DRAFT_RESUBMIT, StateVersion.RESUBMIT]:
         # Check if the dataset has changed on the server
         target_repo_recs = db_manager.find_target_repos_by_dataset_id(dataset_id=dataset.id, status_not_in=[StateVersion.DRAFT])
-
+        db_manager.backup_dataset_by_id(dataset_id)
         for target_repo_rec in target_repo_recs:
             target_repo_identifiers_json = json.loads(target_repo_rec.deposited_identifiers)
             target_service_response_json = json.loads(target_repo_rec.target_service_response) if target_repo_rec.target_service_response else {}
@@ -233,14 +232,10 @@ async def delete_dataset_metadata(request: Request, dataset_id: str, status: Opt
         raise HTTPException(status_code=404, detail='No Dataset found')
 
     if dataset.status == StateVersion.DRAFT_RESUBMIT:
-        # Back to the original after last submitted
-        # TODO: Currently, it works only for one target.
-        target_repo = db_manager.find_target_repo(dataset_id=dataset.id, target_name=repo_assistant.targets[0].repo_name)
-        deposit_source = json.loads(target_repo.target_service_response)['deposit_source']
-        dataset.metadata_content = deposit_source
-        dataset.status = StateVersion.SUBMITTED
-        db_manager.update_dataset(dataset)
-        return delete_dataset_and_its_folder(db_manager, dataset.id, app_name, False)
+
+       db_manager.restore_from_backup(dataset.id)
+
+       return delete_dataset_and_its_folder(db_manager, dataset.id, app_name, False)
 
     target_repos = db_manager.find_target_repos_by_dataset_id(
         dataset_id=dataset.id, status_not_in=[StateVersion.SUBMITTED, StateVersion.RESUBMIT, StateVersion.DRAFT_RESUBMIT])

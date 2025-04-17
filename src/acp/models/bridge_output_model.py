@@ -6,7 +6,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-from src.acp.dbz import DepositStatus
+from src.acp.db.dbz import DepositStatus
 
 
 class ResponseContentType(StrEnum):
@@ -107,7 +107,6 @@ class TargetDataModel(BaseModel):
     """
     deposit_time: Optional[str] = Field(datetime.now(timezone.utc).isoformat(), alias='deposit-time')
     deposit_status: Optional[DepositStatus] = Field(None, alias='deposit-status')
-    deposit_source: Optional[str|dict] = Field(default=None, alias='deposit-source')
     payload: Optional[dict|str] = Field(None, alias='payload')
     deposited_metadata: Optional[dict|str] = Field(None, alias='deposited-metadata')  #
     deposited_identifiers: Optional[str|List[IdentifierItem]] = Field(None, alias='deposited-identifiers')
