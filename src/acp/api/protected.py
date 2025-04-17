@@ -52,20 +52,18 @@ async def get_inbox_dataset_dc(request: Request, status: StateVersion) -> (
         An awaitable function that returns an InboxDatasetDataModel instance.
     """
     ct = request.headers.get('content-type', MetadataType.JSON)
-    if ct == MetadataType.XML:
-        # for payload type xml, the title is in the headers
-        title = request.headers.get('title', 'no-title')
-        req_body = await request.body()
-        req_body = req_body.decode('utf-8')
-    else:
-        req_body = await request.json()
-        title = jmespath.search('title', req_body)
+    title = request.headers.get('title', 'no-title') if ct == MetadataType.XML else jmespath.search('title', await request.json())
+    req_body = (await request.body()).decode('utf-8') if ct == MetadataType.XML else await request.json()
 
-    return InboxDatasetDataModel(assistant_name=request.headers.get('assistant-config-name'),
-                                 status=status, owner_id=request.headers.get('user-id'),
-                                 metadata_type = MetadataType(ct), title=title,
-                                 target_creds=request.headers.get('targets-credentials'), metadata_content=req_body)
-
+    return InboxDatasetDataModel(
+        assistant_name=request.headers.get('assistant-config-name'),
+        status=status,
+        owner_id=request.headers.get('user-id'),
+        metadata_type=MetadataType(ct),
+        title=title,
+        target_creds=request.headers.get('targets-credentials'),
+        metadata_content=req_body
+    )
 
 @router.post("/inbox/dataset/{status}")
 async def process_inbox_dataset_metadata(request: Request, status: Optional[StateVersion] = None) -> {}:
@@ -109,17 +107,13 @@ async def process_inbox(status, request):
     """
 
     idh = await get_inbox_dataset_dc(request, status)
-
     repo_assistant = await get_repo_assistant(request)
-    app_name = repo_assistant.app_name
-    db_manager = data[app_name]
+    db_manager = data[repo_assistant.app_name]
 
-    if request.headers.get('dataset_id'):
-        dataset_id = request.headers.get('dataset_id')
-    elif idh.metadata_type == MetadataType.JSON:
-        dataset_id = jmespath.search("id", idh.metadata_content)
-    else:
-        dataset_id = uuid.uuid4().hex
+    dataset_id = (
+        request.headers.get('dataset_id') or
+        (jmespath.search("id", idh.metadata_content) if idh.metadata_type == MetadataType.JSON else uuid.uuid4().hex)
+    )
 
     logging.info(f'Start inbox for metadata id: {dataset_id} - release version: {dataset_id} - assistant name: '
            f'{idh.assistant_name}')
@@ -144,49 +138,53 @@ async def process_inbox(status, request):
         metadata = idh.metadata_content
 
     if status in [StateVersion.DRAFT_RESUBMIT, StateVersion.RESUBMIT]:
-        # Check if the dataset has changed on the server
-        target_repo_recs = db_manager.find_target_repos_by_dataset_id(dataset_id=dataset.id, status_not_in=[StateVersion.DRAFT])
+        # Backup dataset and check for changes on the server
         db_manager.backup_dataset_by_id(dataset_id)
-        for target_repo_rec in target_repo_recs:
-            target_repo_identifiers_json = json.loads(target_repo_rec.deposited_identifiers)
-            target_service_response_json = json.loads(target_repo_rec.target_service_response) if target_repo_rec.target_service_response else {}
-            target_service_response_deposited_metadata = target_service_response_json.get('deposited_metadata')
-            if target_service_response_deposited_metadata:
-                api_url = target_repo_identifiers_json[0]['api-url']
-                diff = await compare_dv_json(target_service_response_deposited_metadata, target_repo_rec.name, json.loads(idh.target_creds), api_url)
+        target_repo_recs = db_manager.find_target_repos_by_dataset_id(
+            dataset_id=dataset.id, status_not_in=[StateVersion.DRAFT]
+        )
+        for repo_rec in target_repo_recs:
+            deposited_metadata = json.loads(repo_rec.target_service_response or "{}").get('deposited_metadata')
+            if deposited_metadata:
+                api_url = json.loads(repo_rec.deposited_identifiers)[0]['api-url']
+                diff = await compare_dv_json(deposited_metadata, repo_rec.name, json.loads(idh.target_creds), api_url)
                 if diff:
-                    raise HTTPException(status_code=409,
-                                        detail=f"Dataset {dataset_id} has changed on the server. Please check the diff: {diff}")
-                continue
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Dataset {dataset_id} has changed on the server. Please check the diff: {diff}"
+                    )
 
-    db_record_metadata = Dataset(id=dataset_id, title=idh.title, owner_id=idh.owner_id, status=dataset_status,
-                                 metadata_content=metadata, submission_ready = dataset_submission_ready,
-                                 metadata_type=MetadataType(idh.metadata_type))
-
+    db_record_metadata = Dataset(
+        id=dataset_id,
+        title=idh.title,
+        owner_id=idh.owner_id,
+        status=dataset_status,
+        metadata_content=metadata,
+        submission_ready=dataset_submission_ready,
+        metadata_type=MetadataType(idh.metadata_type)
+    )
 
     dataset = db_manager.update_dataset(db_record_metadata)
 
-    if status == StateVersion.DRAFT or status == StateVersion.SUBMIT:
-        db_recs_target_repo = process_target_repos(repo_assistant, idh.target_creds)
-        db_manager.replace_targets_record(dataset.id, db_recs_target_repo)
+    if status in {StateVersion.DRAFT, StateVersion.SUBMIT}:
+        db_manager.replace_targets_record(
+            dataset.id, process_target_repos(repo_assistant, idh.target_creds)
+        )
 
-    dataset_dir = os.path.join(app_settings.DATA_TMP_BASE_DIR, app_name, str(dataset.id))
-
-    if not os.path.exists(dataset_dir):
-        os.makedirs(dataset_dir)
+    dataset_dir = os.path.join(app_settings.DATA_TMP_BASE_DIR, repo_assistant.app_name, str(dataset.id))
+    os.makedirs(dataset_dir, exist_ok=True)
 
     registered_files, file_submission_ready = process_registered_files(db_manager, dataset.id, idh, dataset_dir)
     if dataset_submission_ready and file_submission_ready:
         db_manager.set_dataset_ready_for_ingest(dataset.id, True)
 
-    logging.info(f'Registered files: {registered_files}')
-    logging.info(f'Dataset: {dataset_submission_ready} File state: {file_submission_ready}')
+    logging.info(f"Registered files: {registered_files}")
+    logging.info(f"Dataset ready: {dataset_submission_ready}, File state: {file_submission_ready}")
     process_db_records_registered_files(db_manager, dataset.id, registered_files)
-
 
     if status != StateVersion.DRAFT and db_manager.is_dataset_ready(dataset.id) and db_manager.are_files_uploaded(dataset.id):
         logging.info(f'SUBMIT DATASET with version {status.name} is_dataset_ready {dataset.id}')
-        bridge_job(db_manager, app_name, dataset.id, f"/inbox/dataset/{idh.status}")
+        bridge_job(db_manager, repo_assistant.app_name, dataset.id, f"/inbox/dataset/{idh.status}")
     else:
         logging.info(f'NOT READY to submit dataset with version {status.name} dataset_id: {dataset.id} '
                f'\nNumber still registered: {len(db_manager.find_registered_files(dataset.id))}')
