@@ -115,13 +115,13 @@ async def process_inbox(status, request):
         (jmespath.search("id", idh.metadata_content) if idh.metadata_type == MetadataType.JSON else uuid.uuid4().hex)
     )
 
-    logging.info(f'Start inbox for metadata id: {dataset_id} - release version: {dataset_id} - assistant name: '
+    logging.debug(f'Start inbox for metadata id: {dataset_id} - release version: {dataset_id} - assistant name: '
            f'{idh.assistant_name}')
 
     if not db_manager.find_dataset_only_by_id(dataset_id):
-        logging.info(f'Dataset does not exist: {dataset_id}')
+        logging.debug(f'Dataset does not exist: {dataset_id}')
         dataset = db_manager.create_initial_dataset_record(dataset_id, idh.owner_id, idh.title)
-        logging.info(f'Dataset ID: {dataset.id}')
+        logging.info(f'Create a new dataset ID: {dataset.id}')
 
     else:
         logging.info(f'Dataset already exist: {dataset_id}')
@@ -131,10 +131,10 @@ async def process_inbox(status, request):
     dataset_status = status if status in [StateVersion.DRAFT_RESUBMIT, StateVersion.SUBMIT, StateVersion.RESUBMIT] else dataset.status
 
     if idh.metadata_type == MetadataType.JSON:
-        logging.info('Processing json metadata')
+        logging.debug('Processing json metadata')
         metadata = json.dumps(idh.metadata_content)
     else:
-        logging.info('Processing xml metadata')
+        logging.debug('Processing xml metadata')
         metadata = idh.metadata_content
 
     if status in [StateVersion.DRAFT_RESUBMIT, StateVersion.RESUBMIT]:
@@ -149,6 +149,7 @@ async def process_inbox(status, request):
                 api_url = json.loads(repo_rec.deposited_identifiers)[0]['api-url']
                 diff = await compare_dv_json(deposited_metadata, repo_rec.name, json.loads(idh.target_creds), api_url)
                 if diff:
+                    logging.error(f'Dataset {dataset_id} has changed on the server. Diff: {diff}')
                     raise HTTPException(
                         status_code=409,
                         detail=f"Dataset {dataset_id} has changed on the server. Please check the diff: {diff}"
@@ -178,15 +179,15 @@ async def process_inbox(status, request):
     if dataset_submission_ready and file_submission_ready:
         db_manager.set_dataset_ready_for_ingest(dataset.id, True)
 
-    logging.info(f"Registered files: {registered_files}")
-    logging.info(f"Dataset ready: {dataset_submission_ready}, File state: {file_submission_ready}")
+    logging.debug(f"Registered files: {registered_files}")
+    logging.debug(f"Dataset ready: {dataset_submission_ready}, File state: {file_submission_ready}")
     process_db_records_registered_files(db_manager, dataset.id, registered_files)
 
     if status != StateVersion.DRAFT and db_manager.is_dataset_ready(dataset.id) and db_manager.are_files_uploaded(dataset.id):
-        logging.info(f'SUBMIT DATASET with version {status.name} is_dataset_ready {dataset.id}')
+        logging.debug(f'SUBMIT DATASET with version {status.name} is_dataset_ready {dataset.id}')
         bridge_job(db_manager, repo_assistant.app_name, dataset.id, f"/inbox/dataset/{idh.status}")
     else:
-        logging.info(f'NOT READY to submit dataset with version {status.name} dataset_id: {dataset.id} '
+        logging.debug(f'NOT READY to submit dataset with version {status.name} dataset_id: {dataset.id} '
                f'\nNumber still registered: {len(db_manager.find_registered_files(dataset.id))}')
         # Create the ResponseDataModel with the required dataset_id
     rdm = ResponseDataModel(status="OK")
@@ -219,6 +220,7 @@ async def delete_dataset_metadata(request: Request, dataset_id: str, status: Opt
 
     user_id = request.headers.get('user-id')
     if not user_id:
+        logging.error(f'User ID is required')
         raise HTTPException(status_code=401, detail='No user id provided')
 
     repo_assistant = await get_repo_assistant(request)
@@ -227,13 +229,13 @@ async def delete_dataset_metadata(request: Request, dataset_id: str, status: Opt
     dataset = db_manager.find_dataset_by_id(dataset_id)
 
     if dataset.id not in db_manager.find_dataset_ids_by_owner(user_id):
+        logging.error(f'Dataset {dataset_id} not found for user {user_id}')
         raise HTTPException(status_code=404, detail='No Dataset found')
 
     if dataset.status == StateVersion.DRAFT_RESUBMIT:
-
-       db_manager.restore_from_backup(dataset.id)
-
-       return delete_dataset_and_its_folder(db_manager, dataset.id, app_name, False)
+        logging.debug(f'Restore dataset: {dataset.id}')
+        db_manager.restore_from_backup(dataset.id)
+        return delete_dataset_and_its_folder(db_manager, dataset.id, app_name, False)
 
     target_repos = db_manager.find_target_repos_by_dataset_id(
         dataset_id=dataset.id, status_not_in=[StateVersion.SUBMITTED, StateVersion.RESUBMIT, StateVersion.DRAFT_RESUBMIT])
@@ -264,40 +266,51 @@ def delete_dataset_and_its_folder(db_manager, dataset_id: str, app_name: str, de
     record from the database and checks again if the folder exists to ensure it is removed.
 
     Args:
+        db_manager: The database manager instance used to interact with the database.
         dataset_id (str): The ID of the dataset metadata to be deleted.
+        app_name (str): The name of the application associated with the dataset.
+        delete_dataset (bool): A flag indicating whether to delete the dataset record from the database.
+                               Defaults to True.
 
     Returns:
         dict: A dictionary containing the status of the deletion and the metadata ID.
     """
+    # Construct the path to the dataset folder
     dataset_folder = os.path.join(app_settings.DATA_TMP_BASE_DIR, app_name, str(dataset_id))
     logging.info(f'Delete dataset folder: {dataset_folder}')
+
+    # Check if the dataset folder exists and delete it if found
     if os.path.exists(dataset_folder):
         delete_symlink_and_target(dataset_folder)
     else:
-        logging.info(f'Dataset folder: {dataset_folder} not found')
+        logging.error(f'Dataset folder: {dataset_folder} not found')
+
+    # If delete_dataset is True, delete the dataset record from the database
     if delete_dataset:
         logging.info(f'Delete dataset: {dataset_id}')
         db_manager.delete_by_dataset_id(dataset_id)
 
+    # Check again if the dataset folder exists and remove it to ensure it is deleted
     if os.path.exists(dataset_folder):
         logging.info(f'Delete dataset folder: {dataset_folder}')
         shutil.rmtree(dataset_folder)
     else:
-        logging.info(f'Dataset folder: {dataset_folder} not found')
-    return {"status": "ok", "dataset-id": dataset_id}
+        logging.error(f'Dataset folder: {dataset_folder} not found')
 
+    # Return a dictionary indicating the status of the deletion
+    return {"status": "ok", "dataset-id": dataset_id}
 
 @handle_ps_exceptions
 def process_db_records_registered_files(db_manager, dataset_id, registered_files):
 
     if registered_files:
-        logging.info(f'Insert datafiles records for {dataset_id}')
-        logging.info(f'Number registered_files: {len(registered_files)}')
+        logging.debug(f'Insert datafiles records for {dataset_id}')
+        logging.debug(f'Number registered_files: {len(registered_files)}')
         try:
             db_manager.insert_datafiles(dataset_id, registered_files)
             logging.info(f'SUCCESSFUL  INSERT datafiles records for {dataset_id}, number of files: {len(registered_files)}')
         except ValueError as e:
-            logging.error(f'Error inserting datafiles: {e}')
+            logging.error(f'Error inserting datafiles of dataset_id: {dataset_id}, messages: {e}')
 
 
 @handle_ps_exceptions
@@ -305,7 +318,7 @@ def process_registered_files(db_manager, dataset_id, idh, tmp_dir):
     file_submission_ready = True
     registered_files = []
     if idh.metadata_type == MetadataType.JSON:
-        logging.info('Processing json metadata')
+        logging.debug('Processing json metadata')
         file_names = []
         file_names_from_input = jmespath.search('"file-metadata"[*].name', idh.metadata_content)
         if file_names_from_input:
@@ -443,22 +456,28 @@ async def upload_file(dataset_id: str, file_uuid: str, req: Request) -> {}:
         HTTPException: If the file size is 0.
         HTTPException: If there is a file size mismatch.
     """
-    logging.info(f'find_metadata_by_metadata_id - dataset_id: {dataset_id}')
-    repo_assistant= await get_repo_assistant(req)
-    app_name = repo_assistant.app_name
-    db_manager = data[app_name]
+    logging.debug(f'upload_file - dataset_id: {dataset_id}')
+
+    # Retrieve repository assistant and database manager
+    repo_assistant = await get_repo_assistant(req)
+    db_manager = data[repo_assistant.app_name]
+
+    # Fetch dataset and log metadata processing
     dataset = db_manager.find_dataset_by_id(dataset_id)
-    logging.info(f'PATCH file metadata for metadata_id: {dataset_id}, dataset_id: {dataset_id} and file_uuid: {file_uuid}' )
+    logging.info(f'PATCH file metadata for dataset_id: {dataset_id}, file_uuid: {file_uuid}')
+
+    # Define file paths
     tus_file = os.path.join(app_settings.DATA_TMP_BASE_TUS_FILES_DIR, file_uuid)
     file_info_path = f'{tus_file}.info'
-    if not os.path.exists(file_info_path):
-        logging.error(f'File info NOT FOUND for {file_uuid}: {file_info_path}')
+
+    # Validate file existence and size
+    if not all(map(os.path.exists, [file_info_path, tus_file])):
+        missing_file = file_info_path if not os.path.exists(file_info_path) else tus_file
+        logging.error(f'File NOT FOUND: {missing_file}')
         raise HTTPException(status_code=404, detail='File not found')
-    if not os.path.exists(tus_file):
-        logging.error(f'File NOT FOUND for {file_uuid}: {tus_file}')
-        raise HTTPException(status_code=404, detail='File not found')
+
     if os.path.getsize(tus_file) == 0:
-        logging.error(f'File SIZE IS 0 for {file_uuid}: {tus_file}')
+        logging.error(f'File SIZE IS 0: {tus_file}')
         raise HTTPException(status_code=400, detail='File size is 0')
 
     with open(file_info_path, "r") as file:
@@ -473,7 +492,7 @@ async def upload_file(dataset_id: str, file_uuid: str, req: Request) -> {}:
         logging.error(f'FILE SIZE MISMATCH for {file_uuid}: {tus_file}')
         raise HTTPException(status_code=400, detail='File size mismatch')
 
-    dataset_folder = os.path.join(app_settings.DATA_TMP_BASE_DIR, app_name, str(dataset.id))
+    dataset_folder = os.path.join(app_settings.DATA_TMP_BASE_DIR, repo_assistant.app_name, str(dataset.id))
     source_file_path = os.path.join(app_settings.DATA_TMP_BASE_TUS_FILES_DIR, file_uuid)
     dest_file_path = os.path.join(dataset_folder, file_name)
     # Process the files
@@ -496,7 +515,7 @@ async def upload_file(dataset_id: str, file_uuid: str, req: Request) -> {}:
         db_manager.update_file(DataFile(dataset_id=dataset.id, name=file_name, checksum=sha1_hash,
                                         size=os.path.getsize(source_file_path), mime_type=file_type,
                                         path=dest_file_path, state=DataFileState.UPLOADED))
-        new_name = f'{target}-{dataset_id}.{app_name}'
+        new_name = f'{target}-{dataset_id}.{repo_assistant.app_name}'
         os.rename(target, new_name)
         os.symlink(new_name, link_name)
         logging.info(f'Symlink created: {link_name} -> {target}')
@@ -520,7 +539,7 @@ async def upload_file(dataset_id: str, file_uuid: str, req: Request) -> {}:
     start_process = db_manager.is_dataset_ready(dataset_id)
     if start_process:
         logging.info(f'Start Bridge task for {dataset_id} from the PATCH file endpoint')
-        bridge_job(db_manager, app_name, dataset.id, f'/inbox/files/{dataset.id}/{file_uuid}')
+        bridge_job(db_manager, repo_assistant.app_name, dataset.id, f'/inbox/files/{dataset.id}/{file_uuid}')
         logging.info(f'Bridge task for {dataset.id} started successfully')
     else:
         logging.info(f'Bridge task for {dataset.id} NOT started')
