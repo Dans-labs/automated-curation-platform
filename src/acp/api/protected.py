@@ -383,53 +383,6 @@ def process_target_repos(repo_assistant, target_creds) -> [TargetRepo]:
     return db_recs_target_repo
 
 
-def count_files_in_directory(directory: str) -> int:
-    """
-    Count the number of files in a directory.
-
-    This function lists all items in the specified directory, filters the list to include only files,
-    and returns the count of files.
-
-    Args:
-        directory (str): The path of the directory to count files in.
-
-    Returns:
-        int: The number of files in the directory.
-
-    Raises:
-        FileNotFoundError: If the specified directory does not exist.
-        Exception: If any other error occurs during the process.
-    """
-    try:
-        # List all items in the directory
-        items = os.listdir(directory)
-        # Filter the list to include only files
-        files = [item for item in items if os.path.isfile(os.path.join(directory, item))]
-        # Return the count of files
-        return len(files)
-    except FileNotFoundError:
-        print(f"The directory {directory} does not exist.")
-        return 0
-    except Exception as e:
-        print(f"An error occurred: {e}")
-        return 0
-
-
-def list_files_with_suffix(directory: str, suffix: str) -> list:
-    """
-    List all files in the given directory that end with the specified suffix.
-
-    Parameters:
-    directory (str): The directory to search in.
-    suffix (str): The suffix to filter files by.
-
-    Returns:
-    list: A list of file names that end with the given suffix.
-    """
-    return [file for file in os.listdir(directory) if
-            os.path.isfile(os.path.join(directory, file)) and file.endswith(suffix)]
-
-
 async def delete_file(file_id: str):
     logging.info(f"Deleting file {file_id}")
     url = f'{app_settings.TUS_BASE_URL}/files/{file_id}'
