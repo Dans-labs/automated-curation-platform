@@ -104,13 +104,16 @@ def auth_header(request: Request, auth_cred: Annotated[HTTPAuthorizationCredenti
     if api_key in api_keys:
         return
 
-    keycloak_env = app_settings.get(f"keycloak_{request.headers['auth-env-name']}")
+    keycloak_env = app_settings.get(f"keycloak_{request.headers.get('auth-env-name')}")
     if not keycloak_env:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Forbidden")
 
     try:
-        keycloak_openid = KeycloakOpenID(server_url=keycloak_env.URL, client_id=keycloak_env.CLIENT_ID, realm_name=keycloak_env.REALMS)
-        keycloak_openid.userinfo(api_key)
+        KeycloakOpenID(
+            server_url=keycloak_env.URL,
+            client_id=keycloak_env.CLIENT_ID,
+            realm_name=keycloak_env.REALMS
+        ).userinfo(api_key)
     except KeycloakAuthenticationError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Forbidden")
 
