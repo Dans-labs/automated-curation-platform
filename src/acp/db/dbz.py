@@ -713,8 +713,21 @@ class DatabaseManager:
                     raise ValueError("Failed to restore the main dataset record")
                 if restored_counts['target_repo'] == 0:
                     print("Warning: No target_repo records restored")  # Change to raise ValueError if required
-
                 # Only if restoration succeeded do we delete the backups
+                self.delete_dataset_backups_by_dataset_id(dataset_id)
+                logging.info(f"Successfully restored dataset {dataset_id} and cleaned up backup records")
+                logging.info(f"Records restored: Dataset: {restored_counts['dataset']}, "
+                      f"Target Repo: {restored_counts['target_repo']}, "
+                      f"Data Files: {restored_counts['data_file']}")
+
+            except Exception as e:
+                session.rollback()
+                logging.info(f"Restoration failed - all changes reverted: {e}")
+                raise e
+
+    def delete_dataset_backups_by_dataset_id(self, dataset_id):
+        with db_session(self.engine) as session:
+            try:
                 statement = (
                     delete(DatasetBackup)
                     .where(DatasetBackup.dataset_id == dataset_id)
@@ -727,12 +740,6 @@ class DatabaseManager:
                 )
                 session.exec(statement)
                 session.commit()
-                print(f"Successfully restored dataset {dataset_id} and cleaned up backup records")
-                print(f"Records restored: Dataset: {restored_counts['dataset']}, "
-                      f"Target Repo: {restored_counts['target_repo']}, "
-                      f"Data Files: {restored_counts['data_file']}")
-
             except Exception as e:
                 session.rollback()
-                print(f"Restoration failed - all changes reverted: {e}")
                 raise e
