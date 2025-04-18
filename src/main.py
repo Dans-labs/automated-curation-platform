@@ -134,8 +134,14 @@ def pre_startup_routine(app: FastAPI) -> None:
 
 
 # create FastAPI app instance
-app = FastAPI(title=project_details['title'], description=project_details['description'],
-              version=project_details['version'], lifespan=lifespan)
+
+build_date = os.environ.get("BUILD_DATE", "unknown")
+app = FastAPI(
+    title=project_details['title'],
+    description=project_details['description'],
+    version=f"{project_details['version']} (Build Date: {build_date})",
+    lifespan=lifespan
+)
 
 LOG_FILE = app_settings.LOG_FILE
 log_config = uvicorn.config.LOGGING_CONFIG
