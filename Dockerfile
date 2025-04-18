@@ -1,6 +1,9 @@
 FROM python:3.12.8-bookworm
 LABEL authors="Eko Indarto"
 
+ARG BUILD_DATE
+ENV BUILD_DATE=$BUILD_DATE
+
 
 # Combine apt-get commands to reduce layers
 RUN apt-get update -y && \

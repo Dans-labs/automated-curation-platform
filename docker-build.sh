@@ -27,4 +27,4 @@ fi
 
 # Build the Docker image with the extracted version and specified platform
 echo "Building Docker image with version: $VERSION for platform: $PLATFORM"
-docker buildx build --platform linux/$PLATFORM -t ekoindarto/acp:"$VERSION"-$PLATFORM --load .
+docker buildx build --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") --platform linux/$PLATFORM -t ekoindarto/acp:"$VERSION"-$PLATFORM --load .
