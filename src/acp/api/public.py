@@ -4,7 +4,6 @@ import logging
 from fastapi import APIRouter, Request, HTTPException
 from starlette.responses import Response
 
-# from src import db
 from src.acp.commons import data, app_settings, retrieve_targets_configuration, create_asset
 from src.acp.models.app_model import OwnerAssetsModel
 from src.acp.models.assistant_datamodel import RepoAssistantDataModel
@@ -51,6 +50,7 @@ async def progress_state(owner_id: str, req: Request, page: int = 1, page_size: 
     try:
         target_creds = json.loads(tc_header)
     except json.JSONDecodeError:
+        logging.error(f'Could not decode target creds from header: {tc_header}')
         raise HTTPException(status_code=400, detail="Invalid json format of targets-credentials")
     repo_config = retrieve_targets_configuration(assistant_name)
     repo_assistant = RepoAssistantDataModel.model_validate_json(repo_config)
@@ -80,23 +80,25 @@ async def find_dataset(dataset_id: str, req: Request):
         Response: A JSON response containing the dataset and its associated targets if found,
                   otherwise an empty dictionary.
     """
-    # logging.debug(f'find_metadata_by_metadata_id - metadata_id: {metadata_id}')
-    logging.info(f'find_metadata_by_metadata_id - metadata_id: {dataset_id}')
+    logging.debug(f'find_dataset. dataset_id: {dataset_id}')
+
+    # Retrieve and validate the assistant name from headers
     assistant_name = req.headers.get('assistant-config-name')
-    if assistant_name is None:
+    if not assistant_name:
         raise HTTPException(status_code=400, detail="'assistant-config-name' is missing")
 
-    # Attempt to parse the 'targets-credentials' header as JSON
-
+    # Retrieve repository configuration and initialize database manager
     repo_config = retrieve_targets_configuration(assistant_name)
     repo_assistant = RepoAssistantDataModel.model_validate_json(repo_config)
-    app_name = repo_assistant.app_name
-    db_manager = data[app_name]
+    db_manager = data[repo_assistant.app_name]
+
+    # Fetch dataset and associated targets
     asset = db_manager.find_dataset_and_targets(dataset_id, exclude_target=True)
 
+    # Process and return the dataset metadata
     if asset.dataset_id:
         try:
-            asset.md = json.loads(asset.md)# The dataset.metadata_content is a string, convert it to a dictionary
+            asset.md = json.loads(asset.md)  # Convert metadata content to a dictionary
             return Response(content=asset.model_dump_json(by_alias=True), media_type="application/json")
         except json.JSONDecodeError:
             return Response(content=asset.md, media_type="application/xml")
