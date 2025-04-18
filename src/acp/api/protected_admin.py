@@ -175,26 +175,6 @@ def get_db():
                         media_type='application/octet-stream')
 
 
-@router.delete("/db-delete-all", include_in_schema=False)
-async def delete_all_recs(req: Request):
-    """
-    Endpoint to delete all records from the database.
-
-    This endpoint deletes all records from the database by calling the `delete_all` method
-    of the `db_manager` object.
-
-    Returns:
-        dict: A dictionary containing the status of the deletion.
-
-    Logs:
-        Logs the action of deleting all records.
-    """
-    logging.info('Deleting all')
-    repo_assistant = await get_repo_assistant(req)
-    db_manager = data[repo_assistant.app_name]
-    return db_manager.delete_all()
-
-
 
 # Endpoint to retrieve application app_settings
 @router.get("/app_settings-reload", include_in_schema=False)
