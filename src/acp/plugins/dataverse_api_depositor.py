@@ -123,6 +123,7 @@ class DataverseIngester(Bridge):
         if self.dataset_rec.status == StateVersion.RESUBMIT:
             dv_response, pid = self.__process_resubmit_dataset(dv_headers, str_dv_metadata, str_updated_metadata,
                                                                target_repo_response, tdm)
+            self.db_manager.delete_dataset_backups_by_dataset_id(self.dataset_id)
         else:
             #This is a new dataset
             dv_response, pid = self.__process_submit_dataset(dv_headers, str_dv_metadata, str_updated_metadata,
