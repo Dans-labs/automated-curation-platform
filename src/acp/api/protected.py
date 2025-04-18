@@ -605,16 +605,15 @@ def follow_bridge(db_manager, app_name, dataset_id: str) -> type(None):
     """
     # Log the start time of the thread
     start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    logging.info(f"Thread for datasetId: {dataset_id} started at {start_time}")
+    logging.info(f"Follow bridge - Thread for datasetId: {dataset_id} started at {start_time}")
 
-    logging.info("Follow bridge")
     logging.info(f">>> EXECUTE follow_bridge for datasetId: {dataset_id}")
     db_manager.submitted_now(dataset_id)
     # target_repo_recs = db_manager.find_target_repos_by_dataset_id(dataset_id)
     execute_bridges(db_manager, app_name, dataset_id)
 
 
-def execute_bridges(db_manager, app_name, dataset_id:int) -> None:
+def execute_bridges(db_manager, app_name, dataset_id:str) -> None:
     """
     Execute the bridge process for a dataset.
 
@@ -658,19 +657,19 @@ def execute_bridges(db_manager, app_name, dataset_id:int) -> None:
 
     if len(results) == len(targets):
         logging.info(f'All targets successfully executed for datasetId: {dataset_id}. Deleting dataset folder...')
-        dataset_folder = os.path.join(app_settings.DATA_TMP_BASE_DIR, app_name, str(dataset_id))
-
+        dataset_folder = os.path.join(app_settings.DATA_TMP_BASE_DIR, app_name, dataset_id)
+        # Delete all files in the dataset folder
         for file in Path(dataset_folder).glob('*'):
             if file.is_file():
                 delete_symlink_and_target(file)
-
+        # Remove the dataset folder if it exists
         if os.path.exists(dataset_folder):
             shutil.rmtree(dataset_folder)
             logging.info(f'All related files deleted successfully: {dataset_folder}')
-
+        # Update dataset status to SUBMITTED
         db_manager.update_dataset_status(dataset_id, StateVersion.SUBMITTED)
     else:
-        logging.info(f'Ingest failed for datasetId: {dataset_id}')
+        logging.error(f'Ingest failed for datasetId: {dataset_id}')
         db_manager.update_dataset_status(dataset_id, StateVersion.FAILED)
 
 
@@ -810,7 +809,7 @@ async def dataset_diff(dataset_id: str, req: Request):
     Raises:
         HTTPException: If the dataset is not found.
     """
-    logging.info(f'find_metadata_by_metadata_id - metadata_id: {dataset_id}')
+    logging.debug(f'dataset_diff - dataset_id: {dataset_id}')
     tc_header = req.headers.get('targets-credentials')
     assistant_name = req.headers.get('assistant-config-name')
     if not tc_header or not assistant_name:
