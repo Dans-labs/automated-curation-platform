@@ -649,7 +649,7 @@ class DatabaseManager:
                     .where(
                         DatasetBackup.backup_timestamp == (
                             select(func.max(DatasetBackup.backup_timestamp))
-                            .where(DatasetBackup.dataset_id == dataset_id)
+                            .where(DatasetBackup.dataset_id == dataset_id).limit(1).scalar_subquery()
                         )
                     )
                 )
@@ -735,7 +735,7 @@ class DatabaseManager:
                         DatasetBackup.backup_timestamp == (
                             select(func.max(DatasetBackup.backup_timestamp))
                             .where(DatasetBackup.dataset_id == dataset_id)
-                        )
+                        ).limit(1).scalar_subquery()
                     )
                 )
                 session.exec(statement)
