@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Union
 
 from pydantic import BaseModel, Field
 
@@ -74,7 +74,7 @@ class TargetApp(BaseModel):
     deposited_at: datetime | str = Field(None, alias='deposit-time')
     deposit_duration: float|str = ''
     output_response: dict = Field(None, alias='output-response')
-    deposited_identifiers: str = Field(None, alias='deposited-identifiers')
+    deposited_identifiers: Union[str,List[dict]] = Field(None, alias='deposited-identifiers')
     diff: dict = {}
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import StrEnum, auto
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -109,7 +109,7 @@ class TargetDataModel(BaseModel):
     deposit_status: Optional[DepositStatus] = Field(None, alias='deposit-status')
     payload: Optional[dict|str] = Field(None, alias='payload')
     deposited_metadata: Optional[dict|str] = Field(None, alias='deposited-metadata')  #
-    deposited_identifiers: Optional[str|List[IdentifierItem]] = Field(None, alias='deposited-identifiers')
+    deposited_identifiers: Optional[Union[str,List[IdentifierItem]]] = Field(None, alias='deposited-identifiers')
     deposited_version: Optional[str] = Field(default="", alias='deposited-version')
     response: TargetResponse = Field(default_factory=TargetResponse)
 
