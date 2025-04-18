@@ -257,45 +257,45 @@ class DatabaseManager:
                 session.delete(file_record)
                 session.commit()
 
-
     def delete_by_dataset_id(self, dataset_id: str) -> int:
         with db_session(self.engine) as session:
-            ds = session.exec(select(Dataset).where(Dataset.id == dataset_id)).one_or_none()
-            if ds:
-                for model in [DataFile, TargetRepo]:
-                    session.exec(delete(model).where(model.dataset_id == dataset_id))
-                session.delete(ds)
-                session.commit()
-                return 1
-            return 0
+            dataset = session.exec(select(Dataset).where(Dataset.id == dataset_id)).one_or_none()
+            if not dataset:
+                return 0
+
+            # Delete related records and the dataset
+            for model in [DataFile, TargetRepo]:
+                session.exec(delete(model).where(model.dataset_id == dataset_id))
+            session.delete(dataset)
+            session.commit()
+            return 1
 
     def find_draft_dataset(self, dataset: Dataset) -> Dataset:
         with db_session(self.engine) as session:
-            query = select(Dataset).where(
-                and_(
+            return session.exec(
+                select(Dataset).where(
                     Dataset.id == dataset.id,
                     Dataset.status == StateVersion.DRAFT
                 )
-            )
-            return session.exec(query).first()
+            ).first()
 
     def _get_dataset_with_relationships(self, dataset_id: str) -> Optional[Dataset]:
         with db_session(self.engine) as session:
-            statement = select(Dataset).where(Dataset.id == dataset_id).options(
-                selectinload(Dataset.target_repos),
-                selectinload(Dataset.data_files)
-            )
-            dataset = session.exec(statement).one_or_none()
+            dataset = session.exec(
+                select(Dataset)
+                .where(Dataset.id == dataset_id)
+                .options(
+                    selectinload(Dataset.target_repos),
+                    selectinload(Dataset.data_files)
+                )
+            ).one_or_none()
 
             if dataset:
                 session.refresh(dataset)
                 for repo in dataset.target_repos:
-                    session.refresh(repo)
                     repo.decrypt_config(self.cipher_suite)
-
                 for file in dataset.data_files:
                     session.refresh(file)
-
                 dataset.decrypt_metadata_content(self.cipher_suite)
 
             return dataset
