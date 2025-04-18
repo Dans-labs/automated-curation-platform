@@ -88,111 +88,94 @@ async def process_inbox_dataset_metadata(request: Request, status: Optional[Stat
 
 
 async def process_inbox(status, request):
-    """
-    Process the inbox dataset metadata.
+        """
+        Process the inbox dataset metadata.
 
-    This function processes the metadata of an inbox dataset for the given release version.
-    It validates the dataset, retrieves the repository configuration, processes target repositories,
-    metadata records, and database records. It also checks if the dataset is ready for submission.
+        Args:
+            status (StateVersion): The release version of the dataset.
+            request (Request): The request object containing the dataset metadata.
 
-    Args:
-        status (StateVersion): The release version of the dataset.
-        request (Request): The request object containing the dataset metadata.
+        Returns:
+            ResponseDataModel: A data model containing the status and dataset ID.
+        """
+        idh = await get_inbox_dataset_dc(request, status)
+        repo_assistant = await get_repo_assistant(request)
+        db_manager = data[repo_assistant.app_name]
 
-    Returns:
-        ResponseDataModel: A data model containing the status and dataset ID.
-
-    Raises:
-        HTTPException: If the dataset is already submitted.
-    """
-
-    idh = await get_inbox_dataset_dc(request, status)
-    repo_assistant = await get_repo_assistant(request)
-    db_manager = data[repo_assistant.app_name]
-
-    dataset_id = (
-        request.headers.get('dataset_id') or
-        (jmespath.search("id", idh.metadata_content) if idh.metadata_type == MetadataType.JSON else uuid.uuid4().hex)
-    )
-
-    logging.info(f'Start inbox for metadata id: {dataset_id} - release version: {dataset_id} - assistant name: '
-           f'{idh.assistant_name}')
-
-    if not db_manager.find_dataset_only_by_id(dataset_id):
-        logging.info(f'Dataset does not exist: {dataset_id}')
-        dataset = db_manager.create_initial_dataset_record(dataset_id, idh.owner_id, idh.title)
-        logging.info(f'Dataset ID: {dataset.id}')
-
-    else:
-        logging.info(f'Dataset already exist: {dataset_id}')
-        dataset = db_manager.find_dataset_only_by_id(dataset_id)#TODO: Check if resubmit and the dataset is not found: error!
-
-    dataset_submission_ready = status in [StateVersion.SUBMIT, StateVersion.RESUBMIT]
-    dataset_status = status if status in [StateVersion.DRAFT_RESUBMIT, StateVersion.SUBMIT, StateVersion.RESUBMIT] else dataset.status
-
-    if idh.metadata_type == MetadataType.JSON:
-        logging.info('Processing json metadata')
-        metadata = json.dumps(idh.metadata_content)
-    else:
-        logging.info('Processing xml metadata')
-        metadata = idh.metadata_content
-
-    if status in [StateVersion.DRAFT_RESUBMIT, StateVersion.RESUBMIT]:
-        # Backup dataset and check for changes on the server
-        db_manager.backup_dataset_by_id(dataset_id)
-        target_repo_recs = db_manager.find_target_repos_by_dataset_id(
-            dataset_id=dataset.id, status_not_in=[StateVersion.DRAFT]
-        )
-        for repo_rec in target_repo_recs:
-            deposited_metadata = json.loads(repo_rec.target_service_response or "{}").get('deposited_metadata')
-            if deposited_metadata:
-                api_url = json.loads(repo_rec.deposited_identifiers)[0]['api-url']
-                diff = await compare_dv_json(deposited_metadata, repo_rec.name, json.loads(idh.target_creds), api_url)
-                if diff:
-                    raise HTTPException(
-                        status_code=409,
-                        detail=f"Dataset {dataset_id} has changed on the server. Please check the diff: {diff}"
-                    )
-
-    db_record_metadata = Dataset(
-        id=dataset_id,
-        title=idh.title,
-        owner_id=idh.owner_id,
-        status=dataset_status,
-        metadata_content=metadata,
-        submission_ready=dataset_submission_ready,
-        metadata_type=MetadataType(idh.metadata_type)
-    )
-
-    dataset = db_manager.update_dataset(db_record_metadata)
-
-    if status in {StateVersion.DRAFT, StateVersion.SUBMIT}:
-        db_manager.replace_targets_record(
-            dataset.id, process_target_repos(repo_assistant, idh.target_creds)
+        dataset_id = request.headers.get('dataset_id') or (
+            jmespath.search("id", idh.metadata_content) if idh.metadata_type == MetadataType.JSON else uuid.uuid4().hex
         )
 
-    dataset_dir = os.path.join(app_settings.DATA_TMP_BASE_DIR, repo_assistant.app_name, str(dataset.id))
-    os.makedirs(dataset_dir, exist_ok=True)
+        logging.info(f'Start inbox for metadata id: {dataset_id} - assistant name: {idh.assistant_name}')
 
-    registered_files, file_submission_ready = process_registered_files(db_manager, dataset.id, idh, dataset_dir)
-    if dataset_submission_ready and file_submission_ready:
-        db_manager.set_dataset_ready_for_ingest(dataset.id, True)
+        dataset = db_manager.find_dataset_only_by_id(dataset_id)
+        if not dataset:
+            logging.info(f'Dataset does not exist: {dataset_id}')
+            dataset = db_manager.create_initial_dataset_record(dataset_id, idh.owner_id, idh.title)
+        else:
+            logging.info(f'Dataset already exists: {dataset_id}')
 
-    logging.info(f"Registered files: {registered_files}")
-    logging.info(f"Dataset ready: {dataset_submission_ready}, File state: {file_submission_ready}")
-    process_db_records_registered_files(db_manager, dataset.id, registered_files)
+        dataset_submission_ready = status in {StateVersion.SUBMIT, StateVersion.RESUBMIT}
+        dataset_status = status if status in {StateVersion.DRAFT_RESUBMIT, StateVersion.SUBMIT, StateVersion.RESUBMIT} else dataset.status
+        metadata = json.dumps(idh.metadata_content) if idh.metadata_type == MetadataType.JSON else idh.metadata_content
 
-    if status != StateVersion.DRAFT and db_manager.is_dataset_ready(dataset.id) and db_manager.are_files_uploaded(dataset.id):
-        logging.info(f'SUBMIT DATASET with version {status.name} is_dataset_ready {dataset.id}')
-        bridge_job(db_manager, repo_assistant.app_name, dataset.id, f"/inbox/dataset/{idh.status}")
-    else:
-        logging.info(f'NOT READY to submit dataset with version {status.name} dataset_id: {dataset.id} '
-               f'\nNumber still registered: {len(db_manager.find_registered_files(dataset.id))}')
-        # Create the ResponseDataModel with the required dataset_id
-    rdm = ResponseDataModel(status="OK")
-    rdm.dataset_id = str(dataset.id)
-    rdm.start_process = db_manager.is_dataset_ready(dataset.id)
-    return rdm
+        if status in {StateVersion.DRAFT_RESUBMIT, StateVersion.RESUBMIT}:
+            db_manager.backup_dataset_by_id(dataset_id)
+            target_repo_recs = db_manager.find_target_repos_by_dataset_id(dataset_id=dataset.id, status_not_in=[StateVersion.DRAFT])
+            for repo_rec in target_repo_recs:
+                deposited_metadata = json.loads(repo_rec.target_service_response or "{}").get('deposited_metadata')
+                if deposited_metadata:
+                    api_url = json.loads(repo_rec.deposited_identifiers)[0]['api-url']
+                    diff = await compare_dv_json(deposited_metadata, repo_rec.name, json.loads(idh.target_creds), api_url)
+                    if diff:
+                        raise HTTPException(
+                            status_code=409,
+                            detail=f"Dataset {dataset_id} has changed on the server. Please check the diff: {diff}"
+                        )
+
+        db_record_metadata = Dataset(
+            id=dataset_id,
+            title=idh.title,
+            owner_id=idh.owner_id,
+            status=dataset_status,
+            metadata_content=metadata,
+            submission_ready=dataset_submission_ready,
+            metadata_type=MetadataType(idh.metadata_type)
+        )
+        dataset = db_manager.update_dataset(db_record_metadata)
+
+        if status in {StateVersion.DRAFT, StateVersion.SUBMIT}:
+            db_manager.replace_targets_record(dataset.id, process_target_repos(repo_assistant, idh.target_creds))
+
+        dataset_dir = os.path.join(app_settings.DATA_TMP_BASE_DIR, repo_assistant.app_name, str(dataset.id))
+        os.makedirs(dataset_dir, exist_ok=True)
+
+        registered_files, file_submission_ready = process_registered_files(db_manager, dataset.id, idh, dataset_dir)
+        if dataset_submission_ready and file_submission_ready:
+            db_manager.set_dataset_ready_for_ingest(dataset.id, True)
+
+        logging.info(f"Registered files: {registered_files}")
+        logging.info(f"Dataset ready: {dataset_submission_ready}, File state: {file_submission_ready}")
+
+        if registered_files:
+            try:
+                db_manager.insert_datafiles(dataset_id, registered_files)
+                logging.info(f'Successfully inserted {len(registered_files)} datafile records for dataset {dataset_id}')
+            except ValueError as e:
+                logging.error(f'Error inserting datafiles for dataset {dataset_id}: {e}')
+
+        if status != StateVersion.DRAFT and db_manager.is_dataset_ready(dataset.id) and db_manager.are_files_uploaded(dataset.id):
+            logging.info(f'SUBMIT DATASET with version {status.name} is_dataset_ready {dataset.id}')
+            bridge_job(db_manager, repo_assistant.app_name, dataset.id, f"/inbox/dataset/{idh.status}")
+        else:
+            logging.info(f'NOT READY to submit dataset with version {status.name} dataset_id: {dataset.id} '
+                         f'\nNumber still registered: {len(db_manager.find_registered_files(dataset.id))}')
+
+        return ResponseDataModel(
+            status="OK",
+            dataset_id=str(dataset.id),
+            start_process=db_manager.is_dataset_ready(dataset.id)
+        )
 
 
 @router.delete("/inbox/dataset/{dataset_id:path}")#TODO: Ask Daan to implement this
@@ -222,35 +205,29 @@ async def delete_dataset_metadata(request: Request, dataset_id: str, status: Opt
         raise HTTPException(status_code=401, detail='No user id provided')
 
     repo_assistant = await get_repo_assistant(request)
-    app_name = repo_assistant.app_name
-    db_manager = data[app_name]
+    db_manager = data[repo_assistant.app_name]
     dataset = db_manager.find_dataset_by_id(dataset_id)
 
     if dataset.id not in db_manager.find_dataset_ids_by_owner(user_id):
         raise HTTPException(status_code=404, detail='No Dataset found')
 
     if dataset.status == StateVersion.DRAFT_RESUBMIT:
-
-       db_manager.restore_from_backup(dataset.id)
-
-       return delete_dataset_and_its_folder(db_manager, dataset.id, app_name, False)
+        db_manager.restore_from_backup(dataset.id)
+        return delete_dataset_and_its_folder(db_manager, dataset.id, repo_assistant.app_name, False)
 
     target_repos = db_manager.find_target_repos_by_dataset_id(
-        dataset_id=dataset.id, status_not_in=[StateVersion.SUBMITTED, StateVersion.RESUBMIT, StateVersion.DRAFT_RESUBMIT])
+        dataset_id=dataset.id,
+        status_not_in=[StateVersion.SUBMITTED, StateVersion.RESUBMIT, StateVersion.DRAFT_RESUBMIT]
+    )
+
     if not target_repos:
         logging.info(f'Delete dataset: {dataset.id}, NOT target_repos')
-        return delete_dataset_and_its_folder(db_manager, dataset.id, app_name)
+        return delete_dataset_and_its_folder(db_manager, dataset.id, repo_assistant.app_name)
 
-    if target_repos:
-        can_be_deleted = False
-        for target_repo in target_repos:
-            if target_repo.deposit_status not in (DepositStatus.ACCEPTED, DepositStatus.DEPOSITED, DepositStatus.FINISH):
-                can_be_deleted = True
-                logging.info(f'Delete of {dataset.id} is allowed. Deposit status: {target_repo.deposit_status}')
-                break
-
-        if can_be_deleted:
-            return delete_dataset_and_its_folder(db_manager, dataset.id, app_name)
+    for target_repo in target_repos:
+        if target_repo.deposit_status not in {DepositStatus.ACCEPTED, DepositStatus.DEPOSITED, DepositStatus.FINISH}:
+            logging.info(f'Delete of {dataset.id} is allowed. Deposit status: {target_repo.deposit_status}')
+            return delete_dataset_and_its_folder(db_manager, dataset.id, repo_assistant.app_name)
 
     raise HTTPException(status_code=404, detail=f'Delete of {dataset.id} is not allowed.')
 
@@ -271,35 +248,37 @@ def delete_dataset_and_its_folder(db_manager, dataset_id: str, app_name: str, de
     """
     dataset_folder = os.path.join(app_settings.DATA_TMP_BASE_DIR, app_name, str(dataset_id))
     logging.info(f'Delete dataset folder: {dataset_folder}')
+
     if os.path.exists(dataset_folder):
         delete_symlink_and_target(dataset_folder)
     else:
-        logging.info(f'Dataset folder: {dataset_folder} not found')
+        logging.info(f'Dataset folder not found: {dataset_folder}')
+
     if delete_dataset:
-        logging.info(f'Delete dataset: {dataset_id}')
+        logging.info(f'Deleting dataset: {dataset_id}')
         db_manager.delete_by_dataset_id(dataset_id)
 
     if os.path.exists(dataset_folder):
-        logging.info(f'Delete dataset folder: {dataset_folder}')
         shutil.rmtree(dataset_folder)
+        logging.info(f'Dataset folder deleted: {dataset_folder}')
     else:
-        logging.info(f'Dataset folder: {dataset_folder} not found')
+        logging.info(f'Dataset folder not found: {dataset_folder}')
+
     return {"status": "ok", "dataset-id": dataset_id}
 
 
 
 @handle_ps_exceptions
 def process_db_records_registered_files(db_manager, dataset_id, registered_files):
+    if not registered_files:
+        return
 
-    if registered_files:
-        logging.info(f'Insert datafiles records for {dataset_id}')
-        logging.info(f'Number registered_files: {len(registered_files)}')
-        try:
-            db_manager.insert_datafiles(dataset_id, registered_files)
-            logging.info(f'SUCCESSFUL  INSERT datafiles records for {dataset_id}, number of files: {len(registered_files)}')
-        except ValueError as e:
-            logging.error(f'Error inserting datafiles: {e}')
-
+    logging.info(f'Inserting {len(registered_files)} datafile records for dataset {dataset_id}')
+    try:
+        db_manager.insert_datafiles(dataset_id, registered_files)
+        logging.info(f'Successfully inserted {len(registered_files)} datafile records for dataset {dataset_id}')
+    except ValueError as e:
+        logging.error(f'Error inserting datafiles for dataset {dataset_id}: {e}')
 
 
 
