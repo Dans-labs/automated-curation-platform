@@ -612,20 +612,25 @@ def execute_bridges(db_manager, app_name, dataset_id:int) -> None:
     logging.info(f"execute_bridges for datasetId: {dataset_id}")
     results = []
     targets = db_manager.find_dataset_by_id(dataset_id).target_repos
+
     for target_repo_rec in targets:
-        bridge_class = data[Target(**json.loads(target_repo_rec.configuration)).bridge_plugin_name]
+        target_config = Target(**json.loads(target_repo_rec.configuration))
+        bridge_class = data[target_config.bridge_plugin_name]
         logging.info(f'EXECUTING {bridge_class} for target_repo_id: {target_repo_rec}')
 
         start = time.perf_counter()
-        bridge_instance = get_class(bridge_class)(db_manager= db_manager, app_name= app_name, dataset_id=dataset_id,
-                                                  target=Target(**json.loads(target_repo_rec.configuration)))
+        bridge_instance = get_class(bridge_class)(
+            db_manager=db_manager, app_name=app_name, dataset_id=dataset_id, target=target_config
+        )
         deposit_result = bridge_instance.job()
         deposit_result.response.duration = round(time.perf_counter() - start, 2)
 
         logging.info(f'Result from Deposit: {deposit_result.model_dump_json()}')
         bridge_instance.save_state(deposit_result)
 
-        if deposit_result.deposit_status in [DepositStatus.FINISH, DepositStatus.ACCEPTED, DepositStatus.SUCCESS, DepositStatus.DEPOSITED]:
+        if deposit_result.deposit_status in {
+            DepositStatus.FINISH, DepositStatus.ACCEPTED, DepositStatus.SUCCESS, DepositStatus.DEPOSITED
+        }:
             logging.info(f'Deposit status: {deposit_result.deposit_status} for {dataset_id}')
             results.append(deposit_result)
         else:
@@ -633,20 +638,20 @@ def execute_bridges(db_manager, app_name, dataset_id:int) -> None:
             break
 
     if len(results) == len(targets):
-        logging.info(f'All targets are SUCCESSFULLY executed for datasetId: {dataset_id}, now trying to delete the dataset folder')
-        dataset_folder = os.path.join(app_settings.DATA_TMP_BASE_DIR, app_name,
-                                      str(dataset_id))
-        logging.info(f'Ingest SUCCESSFULL, DELETED {dataset_folder}')
+        logging.info(f'All targets successfully executed for datasetId: {dataset_id}. Deleting dataset folder...')
+        dataset_folder = os.path.join(app_settings.DATA_TMP_BASE_DIR, app_name, str(dataset_id))
 
         for file in Path(dataset_folder).glob('*'):
             if file.is_file():
                 delete_symlink_and_target(file)
+
         if os.path.exists(dataset_folder):
             shutil.rmtree(dataset_folder)
-        logging.info(f'All related files are DELETED successfully: {dataset_folder}')
+            logging.info(f'All related files deleted successfully: {dataset_folder}')
+
         db_manager.update_dataset_status(dataset_id, StateVersion.SUBMITTED)
     else:
-        logging.info(f'Ingest FAILED for datasetId: {dataset_id}')
+        logging.info(f'Ingest failed for datasetId: {dataset_id}')
         db_manager.update_dataset_status(dataset_id, StateVersion.FAILED)
 
 

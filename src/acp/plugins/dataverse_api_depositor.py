@@ -337,13 +337,9 @@ class DataverseIngester(Bridge):
                     logging.info(f'File {file_element} is not ingested. So ingest it')
                     jsonData = json.loads(str_dv_file).get(file_element)
                     data = {"jsonData": json.dumps(jsonData)}
-                    print(f"jsonData: {jsonData}")
                     url_base = f"{self.target.base_url}/api/datasets/:persistentId/add?persistentId={pid}"
-                    print(f"url_base: {url_base}")
                     with open(file_rec.path, 'rb') as f:
-                        print(f"file_rec.path: {file_rec.path}")
-                        print(f"file_rec.name: {file_rec.name}")
-                        print(f"headers: {headers}")
+                        logging.debug(f"file_rec.path: {file_rec.path}. file_rec.name: {file_rec.name}.headers: {headers}")
                         files = {'file': (file_rec.name, f)}
                         response_ingest_file = requests.post(url_base, files=files, data=data, headers=headers,
                                                              timeout=app_settings.get("DATAVERSE_RESPONSE_TIMEOUT",
@@ -353,7 +349,7 @@ class DataverseIngester(Bridge):
                             raise ValueError(response_ingest_file.json())
 
                         logging.info(f'File {file_rec.name} is successfully ingested. Response: {response_ingest_file.json()}')
-
+                        self.__add_file_embargo(headers, jsonData, pid, response_ingest_file.json())
 
     def replace_file_dv_target(self, file, file_id, file_rec, headers, pid, jsonData):
         start = time.perf_counter()
@@ -427,17 +423,21 @@ class DataverseIngester(Bridge):
             logging.info(f'Finish ingesting file {file.name} to {pid} in {round(time.perf_counter() - start, 2)} seconds.')
             # self.db_manager.set_file_ingested(file.id)
 
-            if jsonData.get('embargo'):
-                json_data = {
-                    'dateAvailable': jsonData.get('embargo'),
-                    'reason': '',
-                    'fileIds': [response_ingest_file['data']['files'][0]['dataFile']['id']],
-                }
-                response_embargo = requests.post(
-                    f'{self.target.base_url}/api/datasets/:persistentId/files/actions/:set-embargo?persistentId={pid}',
-                    headers=headers, json=json_data)
-                if response_embargo.status_code != status.HTTP_200_OK:
-                    raise ValueError(response_embargo.text)
+            self.__add_file_embargo(headers, jsonData, pid, response_ingest_file)
+
+    def __add_file_embargo(self, headers, jsonData, pid, response_ingest_file):
+        #TODO: According to Dataverse API, embargo can be in batch; so refactor this function
+        if jsonData.get('embargo'):
+            json_data = {
+                'dateAvailable': jsonData.get('embargo'),
+                'reason': '', # TODO: It should be from user's form but right now, it is not available
+                'fileIds': [response_ingest_file['data']['files'][0]['dataFile']['id']],
+            }
+            response_embargo = requests.post(
+                f'{self.target.base_url}/api/datasets/:persistentId/files/actions/:set-embargo?persistentId={pid}',
+                headers=headers, json=json_data)
+            if response_embargo.status_code != status.HTTP_200_OK:
+                raise ValueError(response_embargo.text)
 
     def __publish_dataset(self, pid, headers) -> int:
         return requests.post(
