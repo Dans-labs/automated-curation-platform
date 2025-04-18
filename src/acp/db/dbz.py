@@ -2,7 +2,6 @@ import base64
 import json
 import logging
 import os
-import sqlite3
 from datetime import datetime, timezone
 from enum import StrEnum, auto, Enum
 from typing import Any, List, Optional
@@ -213,20 +212,24 @@ class DatabaseManager:
         return dataset
 
     def insert_dataset_and_target_repo(self, ds_record: Dataset, repo_records: List[TargetRepo]) -> Dataset:
+        # Encrypt dataset metadata and target repo configurations
         ds_record.encrypt_metadata_content(self.cipher_suite)
         for tr in repo_records:
             tr.encrypt_config(self.cipher_suite)
 
         with db_session(self.engine) as session:
-            max_id = session.exec(select(func.max(Dataset.id))).one_or_none()
-            ds_record.id = (max_id or 0) + 1
+            # Assign a new ID to the dataset
+            ds_record.id = (session.exec(select(func.max(Dataset.id))).one_or_none() or 0) + 1
 
+            # Add dataset and target repos to the database
             session.add(ds_record)
             session.commit()
             for tr in repo_records:
                 tr.dataset_id = ds_record.id
                 session.add(tr)
             session.commit()
+
+            # Refresh and return the dataset record
             session.refresh(ds_record)
         return ds_record
 
@@ -237,7 +240,6 @@ class DatabaseManager:
                     file_record.dataset_id = dataset_id
                     session.add(file_record)
                     session.commit()
-                    session.refresh(file_record)
         except IntegrityError as e:
             raise ValueError(f"IntegrityError: {e.orig}")
         except Exception as e:
@@ -246,18 +248,15 @@ class DatabaseManager:
     def delete_datafile(self, dataset_id: str, filename: str) -> None:
         with db_session(self.engine) as session:
             file_record = session.exec(
-                select(DataFile).where(DataFile.dataset_id == dataset_id, DataFile.name == filename)
+                select(DataFile).where(
+                    DataFile.dataset_id == dataset_id,
+                    DataFile.name == filename
+                )
             ).one_or_none()
             if file_record:
                 session.delete(file_record)
                 session.commit()
 
-    def delete_all(self) -> dict:
-        with db_session(self.engine) as session:
-            tabs = {cls.__qualname__: session.exec(delete(cls)).rowcount
-                    for cls in [DataFile, TargetRepo, Dataset]}
-            session.commit()
-        return tabs
 
     def delete_by_dataset_id(self, dataset_id: str) -> int:
         with db_session(self.engine) as session:
