@@ -2,8 +2,8 @@ import sqlite3
 from contextlib import closing
 
 # Database file paths
-OLD_DB_PATH = 'dans_packaging.db'
-NEW_DB_PATH = 'acp-ohsmart.db'
+OLD_DB_PATH = '/Users/akmi/Downloads/dans_packaging-prod14.db'
+NEW_DB_PATH = '/Users/akmi/surfdrive/WORK-2025/INFRA-DANS-LABS/automated-curation-platform/data/db/acp-ohsmart.db'
 
 def migrate_datasets(old_conn, new_conn):
     """Migrate dataset records with transformations"""
@@ -20,10 +20,10 @@ def migrate_datasets(old_conn, new_conn):
              md, release_version, state) = row
 
             # Metadata type is always JSON now
-            metadata_type = 'json'
+            metadata_type = 'JSON'
 
             # release_version migrates to status
-            status = release_version
+            status = "SUBMITTED" if release_version == "PUBLISH" else "DRAFT"
 
             # state (READY/NOT READY) migrates to submission_ready (1/0)
             submission_ready = 1 if state == 'READY' else 0
@@ -60,9 +60,13 @@ def migrate_target_repos(old_conn, new_conn):
             status_map = {
                 'COMPLETED': 'success',
                 'FAILED': 'failed',
-                'PENDING': 'in_progress'
+                'PENDING': 'in_progress',
+                'FINISH' : 'FINISH',
+                'ERROR': 'ERROR',
+                'PROGRESS' : 'PROGRESS',
             }
             new_deposit_status = status_map.get(deposit_status)
+            new_deposit_status = 'PREPARING' if new_deposit_status is None else new_deposit_status
 
             # Insert into new database
             new_cur.execute("""
