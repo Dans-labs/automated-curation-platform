@@ -93,6 +93,7 @@ class Dataset(SQLModel, table=True):
 
 
 class DepositStatus(str, Enum):
+    PREPARING = 'PREPARING'
     PENDING = "PENDING"
     IN_PROGRESS = "IN_PROGRESS"
     COMPLETED = "COMPLETED"
@@ -118,7 +119,7 @@ class TargetRepo(SQLModel, table=True):
     display_name: str = Field(index=True)
     configuration: str = ""
     url: str
-    deposit_status: Optional[DepositStatus] = Field(default=DepositStatus.PENDING)
+    deposit_status: Optional[DepositStatus] = Field(default=DepositStatus.PREPARING)
     deposited_at: Optional[datetime]
     deposit_duration: float = 0.0
     target_service_response: Optional[str]
