@@ -3,7 +3,7 @@ from contextlib import closing
 
 # Database file paths
 OLD_DB_PATH = '/Users/akmi/Downloads/dans_packaging-prod14.db'
-NEW_DB_PATH = '/Users/akmi/surfdrive/WORK-2025/INFRA-DANS-LABS/automated-curation-platform/data/db/acp-ohsmart.db'
+NEW_DB_PATH = '/Users/akmi/surfdrive/WORK-2025/INFRA-DANS-LABS/automated-curation-platform/data/db/acp_ohsmart.db'
 
 def migrate_datasets(old_conn, new_conn):
     """Migrate dataset records with transformations"""
