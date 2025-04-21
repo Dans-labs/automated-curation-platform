@@ -291,7 +291,7 @@ class DataverseIngester(Bridge):
             else:
                 not_generated_file_in_dv_target.append(file)
 
-        print(json.dumps(not_generated_file_in_dv_target, indent=2))
+        # print(json.dumps(not_generated_file_in_dv_target, indent=2))
         for file in not_generated_file_in_dv_target:
             jsonData = json.loads(str_dv_file).get(file["dataFile"]["filename"])
             file_id = file["dataFile"]["id"]

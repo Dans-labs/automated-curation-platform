@@ -71,7 +71,6 @@ async def lifespan(application: FastAPI):
         db_manager = get_db_manager(app)
         db_manager.create_db_and_tables()
         data.update({app: db_manager})
-    # db_manager.create_db_and_tables()
     iterate_saved_bridge_plugin_dir()
     print(f'Available bridge classes: {sorted(list(data.keys()))}')
     print(emoji.emojize(':thumbs_up:'))
@@ -133,8 +132,6 @@ def pre_startup_routine(app: FastAPI) -> None:
     )
 
 
-# create FastAPI app instance
-
 build_date = os.environ.get("BUILD_DATE", "unknown")
 app = FastAPI(
     title=project_details['title'],
@@ -195,7 +192,12 @@ def iterate_saved_bridge_plugin_dir():
 
 
 if __name__ == "__main__":
+    print("Starting the application...")
+    print("Database dialect:", app_settings.DB_DIALECT)
+    print("Database URL:", app_settings.DB_URL)
     logging.info('START Automated Curation Platform')
     logging.info(f'APP_NAME: {APP_NAME}')
+    logging.info(f'Database dialect: {app_settings.DB_DIALECT}')
+    logging.info("Database URL: %s", app_settings.DB_URL)
     logging.info(f'app_settings: {app_settings.to_dict()}')
     uvicorn.run(app, host="0.0.0.0", port=EXPOSE_PORT, log_config=log_config)

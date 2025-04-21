@@ -7,8 +7,15 @@ from enum import StrEnum, auto, Enum
 from typing import Any, List, Optional
 from contextlib import contextmanager
 
+import psycopg2
+import sqlite3
+
 from cryptography.fernet import Fernet
-from sqlalchemy import delete, inspect, func, and_, text
+# Why use Fernet instead of pgcrypto?
+# Less portable, as the encrypted data is tied to PostgreSQL's implementation.
+#Requires the pgcrypto extension to be installed and enabled in the database.
+from sqlalchemy import delete, inspect, func, and_, text, Column, BigInteger
+from sqlalchemy.engine.url import URL
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import (SQLModel, Field, Relationship, create_engine, Session,
                       select)
@@ -46,12 +53,6 @@ class DatasetWorkState(StrEnum):
     NOT_READY = 'not-ready'
     READY = auto()
     RELEASED = auto()
-
-
-# class FilePermissions(StrEnum):
-#     PUBLIC = auto()
-#     PRIVATE = auto()
-
 
 class DatasetStatus(str, Enum):
     DRAFT = "DRAFT"
@@ -158,7 +159,7 @@ class DataFile(SQLModel, table=True):
     dataset_id: str = Field(foreign_key="dataset.id", index=True)
     name: str = Field(index=True)
     path: Optional[str]
-    size: Optional[int]
+    size: Optional[int] = Field(sa_column=Column(BigInteger))
     mime_type: Optional[str]
     checksum: Optional[str]
     added_at: Optional[datetime]
@@ -178,24 +179,73 @@ class DatasetBackup(SQLModel, table=True):
 
 class DatabaseManager:
     def __init__(self, db_dialect: str, db_url: str, encryption_key: str, app_name: str = ""):
+        self.db_dialect = db_dialect
         self.app_name = app_name
-        db_name = f"acp-{app_name}.db" if app_name.strip() else "acp.db"
-        self.conn_url = f'{db_dialect}:{db_url}/{db_name}'
+        db_name = f"acp_{app_name}" if app_name.strip() else "acp"
+        if db_dialect == "sqlite":
+            self.conn_url = f'{db_dialect}:{db_url}/{db_name}.db'
 
-        db_path = os.path.dirname(self.conn_url.split("///")[1])
-        os.makedirs(db_path, exist_ok=True)
+            db_path = os.path.dirname(self.conn_url.split("///")[1])
+            os.makedirs(db_path, exist_ok=True)
+        elif self.db_dialect == "postgresql+psycopg2":
+            # Correctly parse the db_url and construct the connection URL
+            db_url_parts = db_url.split("@")
+            credentials, host_port = db_url_parts[0], db_url_parts[1]
+            username, password = credentials.split(":")
+            host, port = host_port.split(":")
+
+            self.conn_url = URL.create(
+                drivername=self.db_dialect,  # e.g., 'postgresql+psycopg2'
+                username=username,
+                password=password,
+                host=host,
+                port=port,
+                database=db_name
+            )
 
         self.engine = create_engine(self.conn_url, pool_size=10, echo=False)
         self.cipher_suite = Fernet(base64.urlsafe_b64encode(encryption_key.encode()))
-
-    def create_db_and_tables(self):
+    def __sqlite_create_db_and_tables(self):
         if not inspect(self.engine).has_table("Dataset"):
-            logging.info(f"Creating dataset table of database '{self.app_name}'")
+            msg = f"Creating dataset table of database '{self.app_name}'"
+            logging.info(msg)
+            print(msg)
             SQLModel.metadata.create_all(self.engine, checkfirst=True)
         else:
             msg = f'TABLES ALREADY CREATED IN DATABASE: {self.app_name} at {self.conn_url}'
             print(msg)
             logging.info(msg)
+    def create_db_and_tables(self):
+        if self.db_dialect == "sqlite":
+            self.__sqlite_create_db_and_tables()
+        elif self.db_dialect == "postgresql+psycopg2":
+            # Extract the database name from the connection URL
+            db_name = self.conn_url.database
+
+            # Create a temporary engine with AUTOCOMMIT isolation level
+            default_engine = create_engine(self.conn_url.set(database="postgres"), isolation_level="AUTOCOMMIT")
+
+            with default_engine.connect() as connection:
+                # Check if the database exists
+                result = connection.execute(text("SELECT 1 FROM pg_database WHERE datname = :db_name"),
+                                            {"db_name": db_name})
+                if not result.fetchone():
+                    msg = f"Database '{db_name}' does not exist. Creating it..."
+                    print(msg)
+                    logging.info(msg)
+                    connection.execute(text(f"CREATE DATABASE {db_name}"))
+                else:
+                    msg = f"Database '{db_name}' already exists."
+                    print(msg)
+                    logging.info(msg)
+            # Create tables in the target database
+            logging.info(f"Creating tables in database '{self.app_name}' if they do not already exist.")
+            SQLModel.metadata.create_all(self.engine, checkfirst=True)
+        else:
+            msg = f"Unsupported database dialect '{self.db_dialect}'"
+            logging.error(msg)
+            print(msg)
+            raise ValueError(msg)
 
     def create_initial_dataset_record(self, dataset_id: str, owner_id: str, title: Optional[str] = None) -> Dataset:
         dataset = Dataset(
