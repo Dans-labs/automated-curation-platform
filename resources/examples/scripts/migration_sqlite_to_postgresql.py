@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import psycopg2
 from contextlib import closing
@@ -76,6 +77,11 @@ def migrate_target_repos(old_conn, new_conn):
             }
             new_deposit_status = status_map.get(deposit_status)
             new_deposit_status = 'PREPARING' if new_deposit_status is None else new_deposit_status
+            deposited_identifiers = ""
+            if target_output:
+                tsr = json.loads(target_output)
+                deposited_identifiers = json.dumps(tsr['response']["identifiers"])
+                print(deposited_identifiers)
 
             # Insert into PostgreSQL database
             new_cur.execute("""
@@ -87,7 +93,7 @@ def migrate_target_repos(old_conn, new_conn):
             """, (
                 id_, ds_id, name, display_name, config, url,
                 new_deposit_status, deposit_time, duration,
-                target_output, release_version, None  # deposited_identifiers set to None
+                target_output, release_version, deposited_identifiers
             ))
 
 
