@@ -253,7 +253,7 @@ async def delete_dataset_metadata(request: Request, dataset_id: str, status: Opt
 
         if can_be_deleted:
             return delete_dataset_and_its_folder(db_manager, dataset.id, app_name)
-
+    logging.error(f'Delete of {dataset.id} is not allowed.')
     raise HTTPException(status_code=404, detail=f'Delete of {dataset.id} is not allowed.')
 
 
@@ -396,8 +396,9 @@ def process_target_repos(repo_assistant, target_creds) -> [TargetRepo]:
     input_target_cred_model = TargetsCredentialsModel.model_validate(tgc)
     for repo_target in repo_assistant.targets:
         if repo_target.bridge_plugin_name not in data.keys():
-            raise HTTPException(status_code=404, detail=f'Module "{repo_target.bridge_plugin_name}" not found.',
-                                headers={})
+            msg = f'Module "{repo_target.bridge_plugin_name}" not found.'
+            logging.error(msg)
+            raise HTTPException(status_code=404, detail=msg, headers={})
         target_repo_name = repo_target.repo_name
         logging.info(f'target_repo_name: {target_repo_name}')
         for depositor_cred in input_target_cred_model.targets_credentials:
@@ -748,7 +749,9 @@ def get_md(dataset_id: str, req: Request):
     db_manager = data[app_name]
     dataset = db_manager.get_decrypted_md(dataset_id)
     if not dataset:
-        raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
+        msg = f"Dataset {dataset_id} not found in database"
+        logging.error(msg)
+        raise HTTPException(status_code=404, detail=msg)
     return json.loads(dataset.metadata_content)
 
 
@@ -772,22 +775,27 @@ async def is_modified(dataset_id: str, req: Request):
     tc_header = req.headers.get('targets-credentials')
     assistant_name = req.headers.get('assistant-config-name')
     if not tc_header or not assistant_name:
-        raise HTTPException(status_code=400, detail="Targets credentials are missing and/or assistant-config-name is missing")
+        msg = "Targets credentials are missing and/or assistant-config-name is missing"
+        logging.error(msg)
+        raise HTTPException(status_code=400, detail=msg)
 
     # Attempt to parse the 'targets-credentials' header as JSON
 
     try:
         target_creds = json.loads(tc_header)
     except json.JSONDecodeError:
+        logging.error(f"Could not decode targets credentials header: {tc_header}")
         raise HTTPException(status_code=400, detail="Invalid json format of targets-credentials")
 
     repo_assistant = await get_repo_assistant(req)
     db_manager = data[repo_assistant.app_name]
     dataset = db_manager.find_dataset_only_by_id(dataset_id)
     if not dataset:
+        logging.error(f"Dataset {dataset_id} not found in database")
         raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
 
     if dataset.status is not StateVersion.SUBMITTED:
+        logging.error(f"Dataset {dataset_id} has not been submitted yet")
         raise HTTPException(status_code=400, detail=f"Dataset {dataset_id} is not submitted")
 
     asset = await create_asset(dataset, db_manager, target_creds)
@@ -813,6 +821,7 @@ async def dataset_diff(dataset_id: str, req: Request):
     tc_header = req.headers.get('targets-credentials')
     assistant_name = req.headers.get('assistant-config-name')
     if not tc_header or not assistant_name:
+        logging.error(f"Targets credentials are missing and/or assistant-config-name is missing")
         raise HTTPException(status_code=400, detail="Targets credentials are missing and/or assistant-config-name is missing")
 
     # Attempt to parse the 'targets-credentials' header as JSON
@@ -820,6 +829,7 @@ async def dataset_diff(dataset_id: str, req: Request):
     try:
         target_creds = json.loads(tc_header)
     except json.JSONDecodeError:
+        logging.error(f"Could not decode targets credentials header: {tc_header}")
         raise HTTPException(status_code=400, detail="Invalid json format of targets-credentials")
 
     repo_assistant = await get_repo_assistant(req)
@@ -829,6 +839,7 @@ async def dataset_diff(dataset_id: str, req: Request):
         raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
 
     if dataset.status is not StateVersion.SUBMITTED:
+        logging.error(f"Dataset {dataset_id} has not been submitted yet")
         raise HTTPException(status_code=400, detail=f"Dataset {dataset_id} is not submitted")
 
     asset = await create_asset(dataset, db_manager, target_creds)
@@ -841,14 +852,17 @@ async def create_dataset_form(url: str, req: Request):
     # including any slashes, but still not the query parameters
     tc_header = req.headers.get('targets-credentials')
     if not tc_header:
+        logging.error(f"Targets credentials are missing and/or assistant-config-name is missing")
         raise HTTPException(status_code=400,
                             detail="Targets credentials are missing and/or assistant-config-name is missing")
 
     try:
         target_creds = json.loads(tc_header)
         if len(target_creds) != 1:
+            logging.error(f"{len(target_creds)} is not 1 in tc_header: {tc_header}")
             raise HTTPException(status_code=501, detail="Only one target repo is supported")
     except json.JSONDecodeError:
+        logging.error(f"Could not decode targets credentials header: {tc_header}")
         raise HTTPException(status_code=400, detail="Invalid json format of targets-credentials")
 
     repo_assistant = await get_repo_assistant(req)
@@ -866,6 +880,7 @@ async def create_dataset_form(url: str, req: Request):
             diff = await compare_dv_json(target_service_response_deposited_metadata, target_repo_rec.name, target_creds,
                                          api_url)
             if diff:
+                logging.warning(f"Not supported yet: Difference between target repo and the current dataset: {diff}")
                 raise HTTPException(status_code=501,
                                     detail=f"Dataset {persistent_id} has changed on the server. Not implemented yet")
             return {"dataset-id": target_repo_rec.dataset_id}
