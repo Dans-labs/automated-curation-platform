@@ -39,12 +39,15 @@ data = {}
 
 project_details = a_commons.get_project_details(os.getenv("BASE_DIR"), ['name', 'version', 'description', 'title'])
 
-db_manager = DatabaseManager(db_dialect=app_settings.DB_DIALECT, db_url=app_settings.DB_URL
-                             , encryption_key=app_settings.DB_ENCRYPTION_KEY)
+db_dialect = os.getenv("DB_DIALECT", app_settings.DB_DIALECT)
+db_url = os.getenv("DB_URL", app_settings.DB_URL)
+encryption_key = os.getenv("DB_ENCRYPTION_KEY", app_settings.DB_ENCRYPTION_KEY)
 
 def get_db_manager(app_name: str):
-    return DatabaseManager(db_dialect=app_settings.DB_DIALECT, db_url=app_settings.DB_URL
-                             , encryption_key=app_settings.DB_ENCRYPTION_KEY, app_name= app_name)
+    return DatabaseManager(db_dialect=db_dialect,
+                           db_url=db_url,
+                           encryption_key=encryption_key,
+                           app_name= app_name)
 
 transformer_headers = {
     'Content-Type': 'application/json',
@@ -290,51 +293,47 @@ def inspect_bridge_plugin(py_file_path: str):
 
 def send_mail(subject: str, text: str, recipients: list[str] = None):
     """
-    Send an email with the specified subject and text.
-
-    This function sends an email using the SMTP protocol. The email is sent from the sender's email address
-    to the recipient's email address, with the specified subject and text. The email app_settings (sender email,
-    app password, recipient email, and mail subject prefix) are read from the application's configuration.
+    Send an email with the specified subject and text using SMTP.
 
     Args:
         subject (str): The subject of the email.
         text (str): The text content of the email.
+        recipients (list[str], optional): List of recipient email addresses. Defaults to app_settings.MAIL_TO.
 
     Raises:
-        Exception: If there is an error sending the email.
+        ValueError: If there is an error sending the email.
     """
     sender_email = app_settings.MAIL_USR
     app_password = app_settings.MAIL_PASS
-    if not recipients:
-        recipients = list(app_settings.MAIL_TO)
+    recipients = recipients or list(app_settings.MAIL_TO)
 
     message = MIMEMultipart()
     message['From'] = sender_email
     message['Subject'] = f'{app_settings.get("MAIL_SUBJECT_PREFIX", "mail_subject_prefix not set")}: {subject}'
     message.attach(MIMEText(text, 'plain'))
 
-    if app_settings.get('send_mail', True):
-        try:
-            with smtplib.SMTP(app_settings.SMTP_SERVER, app_settings.SMTP_PORT) as server:
-                if app_settings.get('use_tls', True):
-                    server.starttls()
-                    server.login(sender_email, app_password)
-                for recipient_email in recipients:
-                    message['To'] = recipient_email
-                    server.sendmail(sender_email, recipient_email, message.as_string())
-                    logging.debug(f"Email sent successfully to {recipient_email}")
-            logging.debug(f"Email sent successfully to {recipients}")
-        except Exception as e:
-            print(f"Error: {e}")
-            logging.error(f"Unsuccessful sent email to {recipients}")
-            raise ValueError(f"Error: {e}")
-    else:
+    if not app_settings.get('send_mail', True):
         logging.info("Sending email is disabled.")
+        return
 
+    try:
+        with smtplib.SMTP(app_settings.SMTP_SERVER, app_settings.SMTP_PORT) as server:
+            if app_settings.get('use_tls', True):
+                server.starttls()
+                server.login(sender_email, app_password)
+            for recipient in recipients:
+                message['To'] = recipient
+                server.sendmail(sender_email, recipient, message.as_string())
+                logging.debug(f"Email sent successfully to {recipient}")
+        logging.debug(f"Email sent successfully to all recipients: {recipients}")
+    except Exception as e:
+        logging.error(f"Failed to send email to {recipients}: {e}")
+        raise ValueError(f"Error: {e}")
 
 def dmz_dataverse_headers(username, password) -> dict:
-    headers = {'X-Authorization': app_settings.dmz_x_authorization_value} if app_settings.exists("dmz_x_authorization_value",
-                                                                                         fresh=False) else {}
+    headers = {}
+    if app_settings.exists("dmz_x_authorization_value", fresh=False):
+        headers['X-Authorization'] = app_settings.dmz_x_authorization_value
     if username == 'API_KEY':
         headers["X-Dataverse-key"] = password
     return headers
@@ -631,56 +630,49 @@ def processed_metadata_handler(steps, rec):
     return rec
 
 
+def fetch_from_assistant_config(endpoint: str) -> str:
+    """
+    Fetch data from the assistant configuration URL.
+
+    Args:
+        endpoint (str): The endpoint to append to the base assistant configuration URL.
+
+    Returns:
+        str: The JSON response from the specified endpoint.
+
+    Raises:
+        HTTPException: If the request fails with a non-200 status code.
+    """
+    repo_url = f'{app_settings.ASSISTANT_CONFIG_URL}/{endpoint}'
+    logging.info(f'Fetching data from {repo_url}')
+    response = requests.get(repo_url, headers=assistant_repo_headers)
+    if response.status_code != 200:
+        logging.error(f'Failed to fetch data: {repo_url}, status code: {response.status_code}')
+        raise HTTPException(status_code=404, detail=f"{repo_url} not found")
+    return response.json()
+
 @handle_ps_exceptions
 def retrieve_targets_configuration(assistant_config_name: str) -> str:
     """
     Retrieve the configuration for the specified assistant.
 
-    This function retrieves the configuration for the given assistant by making a request
-    to the assistant configuration URL.
-
     Args:
         assistant_config_name (str): The name of the assistant configuration to retrieve.
 
     Returns:
         str: The JSON response containing the assistant configuration.
-
-    Raises:
-        HTTPException: If the configuration URL returns a status code other than 200.
     """
-    repo_url = f'{app_settings.ASSISTANT_CONFIG_URL}/name/{assistant_config_name}'
-    logging.info(f'Retrieve targets configuration from {repo_url}')
-    rsp = requests.get(repo_url, headers=assistant_repo_headers)
-    if rsp.status_code != 200:
-        logging.error(f'ERROR: {repo_url} not found, status code: {rsp.status_code}')
-        raise HTTPException(status_code=404, detail=f"{repo_url} not found")
-    return rsp.json()
+    return fetch_from_assistant_config(f'name/{assistant_config_name}')
 
 @handle_ps_exceptions
 def retrieve_apps_list() -> str:
     """
-    Retrieve the configuration for the specified assistant.
-
-    This function retrieves the configuration for the given assistant by making a request
-    to the assistant configuration URL.
-
-    Args:
-        assistant_config_name (str): The name of the assistant configuration to retrieve.
+    Retrieve the list of apps from the assistant configuration URL.
 
     Returns:
-        str: The JSON response containing the assistant configuration.
-
-    Raises:
-        HTTPException: If the configuration URL returns a status code other than 200.
+        str: The JSON response containing the list of apps.
     """
-    repo_url = f'{app_settings.ASSISTANT_CONFIG_URL}/list-apps'
-    logging.info(f'Retrieve list-apps from {repo_url}')
-    rsp = requests.get(repo_url, headers=assistant_repo_headers)
-    if rsp.status_code != 200:
-        logging.error(f'ERROR: {repo_url} not found, status code: {rsp.status_code}')
-        raise HTTPException(status_code=404, detail=f"{repo_url} not found")
-    return rsp.json()
-
+    return fetch_from_assistant_config('list-apps')
 
 #TODO: Refactor this function, retrieve repo_config_name instead of only app_mae
 async def get_repo_assistant(req):
@@ -737,12 +729,12 @@ def validate_json(str_dv_metadata):
     try:
         json.loads(str_dv_metadata)
     except json.JSONDecodeError as e:
-        logging.error(f"Initial JSON decode error: {e}")
+        logging.error(f"JSON decode error: {e}")
         # Remove invalid control characters and retry
         str_dv_metadata = re.sub(r'[\x00-\x1F\x7F]', '', str_dv_metadata)
         try:
             json.loads(str_dv_metadata)
         except json.JSONDecodeError as e:
-            logging.error(f"Retry JSON decode error: {e}")
+            logging.error(f"Retry failed: {e}")
             return None
     return str_dv_metadata
