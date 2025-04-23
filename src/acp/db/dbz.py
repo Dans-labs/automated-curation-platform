@@ -55,6 +55,7 @@ class DatasetWorkState(StrEnum):
     RELEASED = auto()
 
 class DatasetStatus(str, Enum):
+    FAILED = "FAILED"
     DRAFT = "DRAFT"
     SUBMIT = "SUBMIT"
     SUBMITTED = "SUBMITTED"
