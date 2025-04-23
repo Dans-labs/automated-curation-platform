@@ -1,5 +1,6 @@
 import json
 import logging
+from typing import List
 
 from fastapi import APIRouter, Request, HTTPException
 from starlette.responses import Response
@@ -26,7 +27,7 @@ async def get_plugins_list():
 
 
 @router.get("/progress-state/{owner_id}")
-async def progress_state(owner_id: str, req: Request, page: int = 1, page_size: int = 10):
+async def progress_state(owner_id: str, req: Request, page: int = 1, page_size: int = 10, sort_by: List[tuple] = [("saved_at", "ASC")]):
     """
     Endpoint to retrieve the progress state of assets owned by a specific owner.
 
@@ -57,7 +58,7 @@ async def progress_state(owner_id: str, req: Request, page: int = 1, page_size: 
     app_name = repo_assistant.app_name
     db_manager = data[app_name]
     # Find datasets by owner ID
-    datasets = db_manager.find_datasets_by_owner(owner_id, page, page_size)
+    datasets = db_manager.find_datasets_by_owner(owner_id, page, page_size, sort_by)
     if datasets:
         oam = OwnerAssetsModel()
         oam.owner_id = owner_id
