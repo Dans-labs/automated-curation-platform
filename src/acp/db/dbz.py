@@ -23,6 +23,8 @@ from sqlalchemy.orm import selectinload
 
 from src.acp.models.app_model import Asset, TargetApp
 
+def get_acp_version() -> str:
+    return os.environ.get("acp_version", "unknown")  # Replace with the actual logic to retrieve the version if needed
 
 @contextmanager
 def db_session(engine):
@@ -81,6 +83,7 @@ class Dataset(SQLModel, table=True):
 
     status: DatasetStatus = Field(default=DatasetStatus.DRAFT)
     submission_ready: bool = Field(default=False)
+    acp_version: str = Field(default_factory=get_acp_version)  # Dynamically set default
 
     target_repos: List["TargetRepo"] = Relationship(back_populates="dataset")
     data_files: List["DataFile"] = Relationship(back_populates="dataset")
@@ -419,12 +422,23 @@ class DatabaseManager:
         with db_session(self.engine) as session:
             return session.exec(select(Dataset.id).where(Dataset.owner_id == owner_id)).all()
 
-    def find_datasets_by_owner(self, owner_id: str, page: int = 1, page_size: int = 10) -> List[TargetRepo]:
+    def find_datasets_by_owner(
+            self,
+            owner_id: str,
+            page: int = 1,
+            page_size: int = 10,
+            sort_by: List[tuple] = [("saved_at", "ASC")]
+    ) -> List[Dataset]:
         with db_session(self.engine) as session:
+            # Dynamically get the columns and sort order
+            sort_columns = [
+                getattr(Dataset, col).asc() if order.upper() == "ASC" else getattr(Dataset, col).desc()
+                for col, order in sort_by
+            ]
             return session.exec(
                 select(Dataset)
                 .where(Dataset.owner_id == owner_id)
-                .order_by(Dataset.id)
+                .order_by(*sort_columns)  # Unpack the list of sort columns
                 .limit(page_size)
                 .offset((page - 1) * page_size)
             ).all()
