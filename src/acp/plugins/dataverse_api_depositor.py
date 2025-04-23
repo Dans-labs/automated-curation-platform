@@ -173,6 +173,8 @@ class DataverseIngester(Bridge):
     def __process_resubmit_dataset(self, dv_headers, str_dv_metadata, str_updated_metadata, target_repo_response, tdm):
         target_repo_rec = self.db_manager.find_target_repo(dataset_id=self.dataset_id,
                                                            target_name=self.target.repo_name)
+        #Update status to submit:
+        self.db_manager.update_dataset_status(dataset_id=self.dataset_id, state=StateVersion.SUBMIT)
         tsr = json.loads(target_repo_rec.target_service_response)
         pid = tsr["response"]["identifiers"][0]["value"]
         identifier_items = []
