@@ -677,12 +677,12 @@ def retrieve_apps_list() -> str:
 #TODO: Refactor this function, retrieve repo_config_name instead of only app_mae
 async def get_repo_assistant(req):
     assistant_name = req.headers.get('assistant-config-name')
-    if assistant_name is None:
+    if not assistant_name:
         raise HTTPException(status_code=400, detail="assistant-config-name")
 
     repo_config = retrieve_targets_configuration(assistant_name)
-    repo_assistant = RepoAssistantDataModel.model_validate_json(repo_config)
-    return repo_assistant
+    return RepoAssistantDataModel.model_validate_json(repo_config)
+
 
 async def create_asset(dataset, db_manager, target_creds):
     asset = Asset()
@@ -691,10 +691,7 @@ async def create_asset(dataset, db_manager, target_creds):
     asset.created_at = dataset.created_at.strftime('%Y-%m-%d %H:%M:%S')
     asset.saved_at = dataset.saved_at.strftime('%Y-%m-%d %H:%M:%S')
     asset.submitted_at = dataset.submitted_at.strftime('%Y-%m-%d %H:%M:%S') if dataset.submitted_at else ''
-    if dataset.status == DatasetStatus.DRAFT_RESUBMIT:
-        asset.status = DatasetStatus.RESUBMIT
-    else:
-        asset.status = dataset.status
+    asset.status = DatasetStatus.RESUBMIT if dataset.status == DatasetStatus.DRAFT_RESUBMIT else dataset.status
 
     # Find target repositories by dataset ID
     target_repo_recs = db_manager.find_target_repos_by_dataset_id(dataset_id=dataset.id, status_not_in=[StateVersion.DRAFT])
@@ -713,12 +710,14 @@ async def create_asset(dataset, db_manager, target_creds):
         target_service_response_deposited_metadata = target_service_response_json.get('deposited_metadata')
         target_repo_identifiers = target_repo_rec.deposited_identifiers
         if target_repo_identifiers:
-            target_repo_identifiers_json = json.loads(target_repo_identifiers)
-            target_app.deposited_identifiers = target_repo_identifiers_json
-            api_url = target_repo_identifiers_json[0]['api-url']
-            target_app.diff = await compare_dv_json(target_service_response_deposited_metadata, target_repo_rec.name,
-                                                    target_creds, api_url)
-
+            target_app.deposited_identifiers = json.loads(target_repo_identifiers)
+            api_url = target_app.deposited_identifiers[0]['api-url']
+            target_app.diff = await compare_dv_json(
+                target_service_response_deposited_metadata,
+                target_repo_rec.name,
+                target_creds,
+                api_url
+            )
         else:
             target_app.output_response = {}
 
