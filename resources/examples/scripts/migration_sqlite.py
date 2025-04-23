@@ -1,9 +1,10 @@
+import json
 import sqlite3
 from contextlib import closing
 
 # Database file paths
-OLD_DB_PATH = '/Users/akmi/Downloads/dans_packaging-prod14.db'
-NEW_DB_PATH = '/Users/akmi/surfdrive/WORK-2025/INFRA-DANS-LABS/automated-curation-platform/data/db/acp_ohsmart.db'
+OLD_DB_PATH = 'path/to/old_database.db'
+NEW_DB_PATH = 'path/to/new_database.db'
 
 def migrate_datasets(old_conn, new_conn):
     """Migrate dataset records with transformations"""
@@ -68,6 +69,12 @@ def migrate_target_repos(old_conn, new_conn):
             new_deposit_status = status_map.get(deposit_status)
             new_deposit_status = 'PREPARING' if new_deposit_status is None else new_deposit_status
 
+            deposited_identifiers = ""
+            if target_output:
+                tsr = json.loads(target_output)
+                deposited_identifiers = json.dumps(tsr['response']["identifiers"])
+                print(deposited_identifiers)
+
             # Insert into new database
             new_cur.execute("""
                 INSERT INTO target_repo (
@@ -78,7 +85,7 @@ def migrate_target_repos(old_conn, new_conn):
             """, (
                 id_, ds_id, name, display_name, config, url,
                 new_deposit_status, deposit_time, duration,
-                target_output, release_version, None  # deposited_identifiers set to None
+                target_output, release_version,  deposited_identifiers
             ))
 
 
