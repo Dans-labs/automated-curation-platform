@@ -14,7 +14,7 @@ from cryptography.fernet import Fernet
 # Why use Fernet instead of pgcrypto?
 # Less portable, as the encrypted data is tied to PostgreSQL's implementation.
 #Requires the pgcrypto extension to be installed and enabled in the database.
-from sqlalchemy import delete, inspect, func, and_, text, Column, BigInteger
+from sqlalchemy import delete, inspect, func, ForeignKey, text, Column, BigInteger, Index
 from sqlalchemy.engine.url import URL
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import (SQLModel, Field, Relationship, create_engine, Session,
@@ -173,10 +173,14 @@ class DatasetBackup(SQLModel, table=True):
     __tablename__ = "dataset_backups"
 
     backup_id: int = Field(default=None, primary_key=True)
-    dataset_id: str = Field(foreign_key="dataset.id", index=True)
+    dataset_id: str = Field(sa_column=Column(ForeignKey("dataset.id", ondelete="SET NULL"), nullable=True))
     backup_timestamp: datetime = Field(nullable=False)
     table_name: str = Field(nullable=False)
     record_data: str = Field(nullable=False)
+
+
+# Define the index separately
+Index("ix_dataset_backups_dataset_id", DatasetBackup.__table__.c.dataset_id)
 
 class DatabaseManager:
     def __init__(self, db_dialect: str, db_url: str, encryption_key: str, app_name: str = ""):
