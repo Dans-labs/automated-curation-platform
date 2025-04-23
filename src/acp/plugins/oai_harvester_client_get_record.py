@@ -8,7 +8,7 @@ import requests
 from sickle import Sickle
 
 from src.acp.bridge import Bridge
-from src.acp.commons import db_manager, transform_xml
+from src.acp.commons import transform_xml
 from src.acp.db.dbz import DepositStatus
 from src.acp.models.bridge_output_model import TargetDataModel, TargetResponse, ResponseContentType, IdentifierItem
 
@@ -44,7 +44,7 @@ class OaiHarvesterClientGetRecord(Bridge):
         )
         print(dv_metadata)
 
-        db_manager.update_dataset_md(self.dataset_id, dv_metadata)
+        self.db_manager.update_dataset_md(self.dataset_id, dv_metadata)
         target_repo = TargetResponse(url=self.target.target_url, status=DepositStatus.FINISH,
                                      message="", content=record.raw, content_type=ResponseContentType.XML)
         target_repo.url = self.target.target_url
