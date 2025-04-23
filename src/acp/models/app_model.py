@@ -105,6 +105,7 @@ class Asset(BaseModel):
     submitted_at: datetime | str = Field(None, alias='submitted-at')
     deposited_version: str = Field(None, alias='deposited-version')
     status: str = Field(None, alias='status')
+    acp_version: str = Field(None, alias='acp-version')
     targets: List[TargetApp] = []
 
 

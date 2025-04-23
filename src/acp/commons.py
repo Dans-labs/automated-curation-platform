@@ -692,6 +692,7 @@ async def create_asset(dataset, db_manager, target_creds):
     asset.saved_at = dataset.saved_at.strftime('%Y-%m-%d %H:%M:%S')
     asset.submitted_at = dataset.submitted_at.strftime('%Y-%m-%d %H:%M:%S') if dataset.submitted_at else ''
     asset.status = DatasetStatus.RESUBMIT if dataset.status == DatasetStatus.DRAFT_RESUBMIT else dataset.status
+    asset.acp_version = dataset.acp_version
 
     # Find target repositories by dataset ID
     target_repo_recs = db_manager.find_target_repos_by_dataset_id(dataset_id=dataset.id, status_not_in=[StateVersion.DRAFT])

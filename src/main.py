@@ -133,10 +133,12 @@ def pre_startup_routine(app: FastAPI) -> None:
 
 
 build_date = os.environ.get("BUILD_DATE", "unknown")
+
+os.environ["acp_version"] = f"{project_details['version']} (Build Date: {build_date})"
 app = FastAPI(
     title=project_details['title'],
     description=project_details['description'],
-    version=f"{project_details['version']} (Build Date: {build_date})",
+    version=os.environ.get("acp_version", "unknown"),
     lifespan=lifespan
 )
 
