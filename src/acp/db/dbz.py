@@ -73,17 +73,14 @@ class Dataset(SQLModel, table=True):
     id: str = Field(primary_key=True, index=True)
     title: Optional[str] = Field(nullable=True)
     owner_id: str = Field(index=True)
-
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     saved_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    submitted_at: Optional[datetime] = None
-
-    metadata_content: str = Field(default="{}", nullable=False)
-    metadata_type: MetadataType = Field(default=MetadataType.JSON, nullable=False)
-
     status: DatasetStatus = Field(default=DatasetStatus.DRAFT)
+    submitted_at: Optional[datetime] = None
+    metadata_type: MetadataType = Field(default=MetadataType.JSON, nullable=False)
     submission_ready: bool = Field(default=False)
     acp_version: str = Field(default_factory=get_acp_version)  # Dynamically set default
+    metadata_content: str = Field(default="{}", nullable=False)
 
     target_repos: List["TargetRepo"] = Relationship(back_populates="dataset")
     data_files: List["DataFile"] = Relationship(back_populates="dataset")
@@ -122,14 +119,14 @@ class TargetRepo(SQLModel, table=True):
     dataset_id: str = Field(foreign_key="dataset.id", index=True)
     name: str = Field(index=True)
     display_name: str = Field(index=True)
-    configuration: str = ""
     url: str
     deposit_status: Optional[DepositStatus] = Field(default=DepositStatus.PREPARING)
     deposited_at: Optional[datetime]
     deposit_duration: float = 0.0
-    target_service_response: Optional[str]
     deposited_version: Optional[str]
     deposited_identifiers: Optional[str] = Field(default="", index=True)
+    configuration: str = ""
+    target_service_response: Optional[str]
 
     dataset: Optional["Dataset"] = Relationship(back_populates="target_repos")
 
@@ -138,6 +135,14 @@ class TargetRepo(SQLModel, table=True):
 
     def decrypt_config(self, cipher_suite):
         self.configuration = cipher_suite.decrypt(self.configuration.encode()).decode()
+
+    def encrypt_target_service_response(self, cipher_suite):
+        if self.target_service_response:
+            self.target_service_response = cipher_suite.encrypt(self.target_service_response.encode()).decode()
+
+    def decrypt_target_service_response(self, cipher_suite):
+        if self.target_service_response:
+            self.target_service_response = cipher_suite.decrypt(self.target_service_response.encode()).decode()
 
 
 class DataFileState(str, Enum):
@@ -275,6 +280,7 @@ class DatabaseManager:
         ds_record.encrypt_metadata_content(self.cipher_suite)
         for tr in repo_records:
             tr.encrypt_config(self.cipher_suite)
+            tr.encrypt_target_service_response(self.cipher_suite)
 
         with db_session(self.engine) as session:
             # Assign a new ID to the dataset
@@ -353,6 +359,7 @@ class DatabaseManager:
                 session.refresh(dataset)
                 for repo in dataset.target_repos:
                     repo.decrypt_config(self.cipher_suite)
+                    repo.decrypt_target_service_response(self.cipher_suite)
                 for file in dataset.data_files:
                     session.refresh(file)
                 dataset.decrypt_metadata_content(self.cipher_suite)
@@ -374,6 +381,7 @@ class DatabaseManager:
             ).one_or_none()
             if target_repo:
                 target_repo.decrypt_config(self.cipher_suite)
+                target_repo.decrypt_target_service_response(self.cipher_suite)
             return target_repo
 
     def _create_asset_from_dataset(self, dataset: Dataset, include_targets: bool = True) -> Asset:
@@ -396,6 +404,7 @@ class DatabaseManager:
 
                 for target_repo in targets_repo:
                     target_repo.decrypt_config(self.cipher_suite)
+                    target_repo.decrypt_target_service_response(self.cipher_suite)
                     target = TargetApp()
                     target.repo_name = target_repo.name
                     target.display_name = target_repo.display_name
@@ -403,7 +412,7 @@ class DatabaseManager:
                     target.deposited_at = target_repo.deposited_at
                     target.deposit_duration = target_repo.deposit_duration
                     if target_repo.target_service_response:
-                        target.target_service_response = json.loads(target_repo.target_service_response)
+                        target.target_service_response = json.loads(target_repo.decrypt_target_service_response(self.cipher_suite))
                     asset.targets.append(target)
         return asset
 
@@ -453,6 +462,7 @@ class DatabaseManager:
             ).all()
             for target_repo in target_repos:
                 target_repo.decrypt_config(self.cipher_suite)
+                target_repo.decrypt_target_service_response(self.cipher_suite)
             return target_repos
 
     def find_files_by_state(self, dataset_id: str, state: Optional[DataFileState] = None) -> List[DataFile]:
@@ -532,9 +542,12 @@ class DatabaseManager:
 
             if target_repo_rec:
                 target_repo_rec.deposit_status = target_repo.deposit_status
-                target_repo_rec.deposited_version = target_repo.deposited_version or target_repo_rec.deposited_version
-                target_repo_rec.deposited_identifiers = target_repo.deposited_identifiers or target_repo_rec.deposited_identifiers
-                target_repo_rec.target_service_response = target_repo.target_service_response or target_repo_rec.target_service_response
+                target_repo_rec.deposited_version = target_repo.deposited_version
+                if target_repo.deposited_identifiers:
+                    target_repo_rec.deposited_identifiers = target_repo.deposited_identifiers
+                if target_repo.target_service_response:
+                    target_repo_rec.target_service_response = target_repo.target_service_response
+                    target_repo_rec.encrypt_target_service_response(self.cipher_suite)
                 target_repo_rec.deposited_at = datetime.now(timezone.utc)
                 target_repo_rec.deposit_duration = target_repo.deposit_duration
 
@@ -587,6 +600,7 @@ class DatabaseManager:
             for tr in target_repo_records:
                 tr.dataset_id = dataset_id
                 tr.encrypt_config(self.cipher_suite)
+                tr.encrypt_target_service_response(self.cipher_suite)
                 session.add(tr)
             session.commit()
 
