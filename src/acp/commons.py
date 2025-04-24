@@ -711,14 +711,14 @@ async def create_asset(dataset, db_manager, target_creds):
         target_service_response_deposited_metadata = target_service_response_json.get('deposited_metadata')
         target_repo_identifiers = target_repo_rec.deposited_identifiers
         if target_repo_identifiers:
-            target_app.deposited_identifiers = json.loads(target_repo_identifiers)
-            api_url = target_app.deposited_identifiers[0]['api-url']
+            target_app.deposited_identifiers = json.loads(target_repo_identifiers) or []
+            api_url = target_app.deposited_identifiers[0].get("api-url") if target_app.deposited_identifiers else None
             target_app.diff = await compare_dv_json(
                 target_service_response_deposited_metadata,
                 target_repo_rec.name,
                 target_creds,
                 api_url
-            )
+            ) if api_url else {}
         else:
             target_app.output_response = {}
 
