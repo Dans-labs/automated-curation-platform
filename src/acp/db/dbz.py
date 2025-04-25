@@ -26,13 +26,6 @@ from src.acp.models.app_model import Asset, TargetApp
 def get_acp_version() -> str:
     return os.environ.get("acp_version", "unknown")  # Replace with the actual logic to retrieve the version if needed
 
-@contextmanager
-def db_session(engine):
-    session = Session(engine)
-    try:
-        yield session
-    finally:
-        session.close()
 
 class StateVersion(StrEnum):
     DRAFT = 'DRAFT'
@@ -196,10 +189,12 @@ class DatabaseManager:
         self.app_name = app_name
         db_name = f"acp_{app_name}" if app_name.strip() else "acp"
         if db_dialect == "sqlite":
-            self.conn_url = f'{db_dialect}:{db_url}/{db_name}.db'
-
-            db_path = os.path.dirname(self.conn_url.split("///")[1])
-            os.makedirs(db_path, exist_ok=True)
+            if db_url == ":memory:":
+                self.conn_url = f'{db_dialect}:///{db_url}'
+            else:
+                self.conn_url = f'{db_dialect}:{db_url}/{db_name}.db'
+                db_path = os.path.dirname(self.conn_url.split("///")[1])
+                os.makedirs(db_path, exist_ok=True)
         elif self.db_dialect == "postgresql+psycopg2":
             # Correctly parse the db_url and construct the connection URL
             db_url_parts = db_url.split("@")
@@ -228,6 +223,14 @@ class DatabaseManager:
             msg = f'TABLES ALREADY CREATED IN DATABASE: {self.app_name} at {self.conn_url}'
             print(msg)
             logging.info(msg)
+
+    @contextmanager
+    def __db_session(self):
+        session = Session(self.engine)
+        try:
+            yield session
+        finally:
+            session.close()
     def create_db_and_tables(self):
         if self.db_dialect == "sqlite":
             self.__sqlite_create_db_and_tables()
@@ -269,7 +272,7 @@ class DatabaseManager:
             submission_ready=False
         )
         dataset.encrypt_metadata_content(self.cipher_suite)
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             session.add(dataset)
             session.commit()
             session.refresh(dataset)
@@ -282,7 +285,7 @@ class DatabaseManager:
             tr.encrypt_config(self.cipher_suite)
             tr.encrypt_target_service_response(self.cipher_suite)
 
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             # Assign a new ID to the dataset
             ds_record.id = (session.exec(select(func.max(Dataset.id))).one_or_none() or 0) + 1
 
@@ -300,7 +303,7 @@ class DatabaseManager:
 
     def insert_datafiles(self, dataset_id, file_records: List[DataFile]) -> None:
         try:
-            with db_session(self.engine) as session:
+            with self.__db_session() as session:
                 for file_record in file_records:
                     file_record.dataset_id = dataset_id
                     session.add(file_record)
@@ -311,7 +314,7 @@ class DatabaseManager:
             raise ValueError(f"Exception: {e}")
 
     def delete_datafile(self, dataset_id: str, filename: str) -> None:
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             file_record = session.exec(
                 select(DataFile).where(
                     DataFile.dataset_id == dataset_id,
@@ -323,7 +326,7 @@ class DatabaseManager:
                 session.commit()
 
     def delete_by_dataset_id(self, dataset_id: str) -> int:
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             dataset = session.exec(select(Dataset).where(Dataset.id == dataset_id)).one_or_none()
             if not dataset:
                 return 0
@@ -336,7 +339,7 @@ class DatabaseManager:
             return 1
 
     def find_draft_dataset(self, dataset: Dataset) -> Dataset:
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             return session.exec(
                 select(Dataset).where(
                     Dataset.id == dataset.id,
@@ -345,7 +348,7 @@ class DatabaseManager:
             ).first()
 
     def _get_dataset_with_relationships(self, dataset_id: str) -> Optional[Dataset]:
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             dataset = session.exec(
                 select(Dataset)
                 .where(Dataset.id == dataset_id)
@@ -373,7 +376,7 @@ class DatabaseManager:
         return self._get_dataset_with_relationships(dataset_id)
 
     def find_target_repo(self, dataset_id: str, target_name: str) -> TargetRepo:
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             target_repo = session.exec(
                 select(TargetRepo).where(
                     TargetRepo.dataset_id == dataset_id,
@@ -395,7 +398,7 @@ class DatabaseManager:
         asset.submitted_at = dataset.submitted_at
 
         if include_targets:
-            with db_session(self.engine) as session:
+            with self.__db_session() as session:
                 targets_repo = session.exec(
                     select(TargetRepo)
                     .where(TargetRepo.dataset_id == dataset.id)
@@ -417,7 +420,7 @@ class DatabaseManager:
         return asset
 
     def find_dataset_and_targets(self, dataset_id: str, exclude_target=False) -> Asset:
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             dataset = session.exec(select(Dataset).where(Dataset.id == dataset_id)).one_or_none()
             if dataset:
                 dataset.decrypt_metadata_content(self.cipher_suite)
@@ -428,7 +431,7 @@ class DatabaseManager:
         return self.find_dataset_and_targets(dataset_id, exclude_target=False)
 
     def find_dataset_ids_by_owner(self, owner_id: str) -> List[TargetRepo]:
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             return session.exec(select(Dataset.id).where(Dataset.owner_id == owner_id)).all()
 
     def find_datasets_by_owner(
@@ -438,7 +441,7 @@ class DatabaseManager:
             page_size: int = 10,
             sort_by: List[tuple] = [("saved_at", "ASC")]
     ) -> List[Dataset]:
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             # Dynamically get the columns and sort order
             sort_columns = [
                 getattr(Dataset, col).asc() if order.upper() == "ASC" else getattr(Dataset, col).desc()
@@ -453,7 +456,7 @@ class DatabaseManager:
             ).all()
 
     def find_target_repos_by_dataset_id(self, dataset_id: str, status_not_in: List[StateVersion]) -> List[TargetRepo]:
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             target_repos = session.exec(
                 select(TargetRepo)
                 .join(Dataset, TargetRepo.dataset_id == Dataset.id)
@@ -466,7 +469,7 @@ class DatabaseManager:
             return target_repos
 
     def find_files_by_state(self, dataset_id: str, state: Optional[DataFileState] = None) -> List[DataFile]:
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             query = select(DataFile).where(DataFile.dataset_id == dataset_id)
             if state is not None:
                 if isinstance(state, list):
@@ -479,7 +482,7 @@ class DatabaseManager:
         return self.find_files_by_state(dataset_id, DataFileState.UPLOADED)
 
     def find_file_by_name(self, dataset_id: str, file_name: str) -> DataFile:
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             return session.exec(
                 select(DataFile)
                 .where(DataFile.dataset_id == dataset_id, DataFile.name == file_name)
@@ -492,21 +495,21 @@ class DatabaseManager:
         return self.find_files_by_state(dataset_id, DataFileState.REGISTERED)
 
     def find_non_registered_files(self, dataset_id: str) -> List[DataFile]:
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             return session.exec(
                 select(DataFile)
                 .where(DataFile.dataset_id == dataset_id, DataFile.state != DataFileState.REGISTERED)
             ).all()
 
     def execute_l(self, dataset_id: str) -> List[str]:
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             return session.exec(
                 select(DataFile.name)
                 .where(DataFile.dataset_id == dataset_id, DataFile.state == DataFileState.UPLOADED)
             ).all()
 
     def update_dataset(self, dataset: Dataset) -> Dataset:
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             ds_record = session.exec(select(Dataset).where(Dataset.id == dataset.id)).one_or_none()
             if ds_record:
                 ds_record.metadata_content = dataset.metadata_content
@@ -523,7 +526,7 @@ class DatabaseManager:
         return None
 
     def set_dataset_ready_for_ingest(self, dataset_id: str, submission_ready: bool = False) -> None:
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             dataset = session.exec(select(Dataset).where(Dataset.id == dataset_id)).one_or_none()
             if dataset:
                 dataset.submission_ready = submission_ready
@@ -532,7 +535,7 @@ class DatabaseManager:
                 session.refresh(dataset)
 
     def update_target_repo_deposit_status(self, target_repo: TargetRepo) -> None:
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             target_repo_rec = session.exec(
                 select(TargetRepo).where(
                     TargetRepo.dataset_id == target_repo.dataset_id,
@@ -555,7 +558,7 @@ class DatabaseManager:
                 session.commit()
 
     def submitted_now(self, dataset_id: str) -> None:
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             dataset = session.exec(select(Dataset).where(Dataset.id == dataset_id)).one_or_none()
             if dataset:
                 dataset.submitted_at = datetime.now(timezone.utc)
@@ -565,7 +568,7 @@ class DatabaseManager:
                 session.refresh(dataset)
 
     def update_file(self, df: DataFile) -> None:
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             f_record = session.exec(
                 select(DataFile)
                 .where(DataFile.dataset_id == df.dataset_id, DataFile.name == df.name)
@@ -582,7 +585,7 @@ class DatabaseManager:
                 session.refresh(f_record)
 
     def update_file_access_level(self, dataset_id: str, filename: str, access_level: AccessLevel) -> None:
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             f_record = session.exec(
                 select(DataFile)
                 .where(DataFile.dataset_id == dataset_id, DataFile.name == filename)
@@ -594,7 +597,7 @@ class DatabaseManager:
                 session.refresh(f_record)
 
     def replace_targets_record(self, dataset_id: str, target_repo_records: List[TargetRepo]) -> None:
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             session.exec(delete(TargetRepo).where(TargetRepo.dataset_id == dataset_id))
             session.commit()
             for tr in target_repo_records:
@@ -605,7 +608,7 @@ class DatabaseManager:
             session.commit()
 
     def is_dataset_ready(self, dataset_id: str) -> bool:
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             return session.exec(
                 select(Dataset.id).where(
                     (Dataset.id == dataset_id) &
@@ -617,7 +620,7 @@ class DatabaseManager:
         return len(self.find_registered_files(dataset_id)) == 0
 
     def update_dataset_status(self, dataset_id: str, state: StateVersion) -> None:
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             ds_record = session.exec(select(Dataset).where(Dataset.id == dataset_id)).one_or_none()
             if ds_record:
                 ds_record.status = state
@@ -626,7 +629,7 @@ class DatabaseManager:
                 session.refresh(ds_record)
 
     def delete_generated_files(self, dataset_id: str) -> None:
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             session.exec(
                 delete(DataFile)
                 .where(DataFile.dataset_id == dataset_id, DataFile.state == DataFileState.GENERATED)
@@ -634,7 +637,7 @@ class DatabaseManager:
             session.commit()
 
     def find_target_repo_by_indentifier(self, doi: str) -> Optional[TargetRepo]:
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             return session.exec(
                 select(TargetRepo).where(TargetRepo.deposited_identifiers.contains(doi))
             ).one_or_none()
@@ -649,7 +652,7 @@ class DatabaseManager:
             dataset_id (str): The dataset ID to backup
         """
         backup_time = datetime.now()
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             try:
                 # Check if dataset_id already exists in dataset_backups
                 existing_backup = session.exec(
@@ -723,7 +726,7 @@ class DatabaseManager:
             dataset_id (str): The dataset ID to restore
         """
 
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             try:
                 # Get the backup records and identify which ones we're working with
                 statement = (
@@ -809,7 +812,7 @@ class DatabaseManager:
                 raise e
 
     def delete_dataset_backups_by_dataset_id(self, dataset_id):
-        with db_session(self.engine) as session:
+        with self.__db_session() as session:
             try:
                 statement = (
                     delete(DatasetBackup)
