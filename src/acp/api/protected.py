@@ -362,7 +362,7 @@ def process_registered_files(db_manager, dataset_id, idh, tmp_dir):
 
             f_permission = jmespath.search(f'"file-metadata"[?name == `{escaped_filename}`].private', idh.metadata_content)
             permission = AccessLevel.PRIVATE if f_permission[0] else AccessLevel.PUBLIC
-            registered_files.append(DataFile(name=f_name, path=file_path, permissions=permission))
+            registered_files.append(DataFile(name=f_name, path=file_path, access_level=permission))
 
         logging.info(f'registered_files: {registered_files}')
 
@@ -496,26 +496,14 @@ async def upload_file(dataset_id: str, file_uuid: str, req: Request) -> {}:
     dataset_folder = os.path.join(app_settings.DATA_TMP_BASE_DIR, repo_assistant.app_name, str(dataset.id))
     source_file_path = os.path.join(app_settings.DATA_TMP_BASE_TUS_FILES_DIR, file_uuid)
     dest_file_path = os.path.join(dataset_folder, file_name)
+    file_type = file_metadata['metadata'].get('filetype', mimetypes.guess_type(dest_file_path)[0])
+    file_size = os.path.getsize(source_file_path)
+    sha1_hash = calculate_sha1_checksum(source_file_path)
     # Process the files
     logging.info(f'Processing using symlink {source_file_path} to {dest_file_path}')
     target = source_file_path
     link_name = dest_file_path
     try:
-        sha1_hash = calculate_sha1_checksum(source_file_path)
-        # md5_hash = ""
-        # if app_settings.get("use_md5_hash", True):
-        #     with open(source_file_path, 'rb') as file:
-        #         md5_hash = hashlib.md5(file.read()).hexdigest()
-            # with open(source_file_path, "rb") as f:
-            #     file_hash = hashlib.md5()
-            #     while chunk := f.read(8192):
-            #         file_hash.update(chunk)
-            # md5_hash = file_hash.hexdigest()
-
-        file_type = file_metadata['metadata'].get('filetype', mimetypes.guess_type(dest_file_path)[0])
-        db_manager.update_file(DataFile(dataset_id=dataset.id, name=file_name, checksum=sha1_hash,
-                                        size=os.path.getsize(source_file_path), mime_type=file_type,
-                                        path=dest_file_path, state=DataFileState.UPLOADED))
         new_name = f'{target}-{dataset_id}.{repo_assistant.app_name}'
         os.rename(target, new_name)
         os.symlink(new_name, link_name)
@@ -529,6 +517,10 @@ async def upload_file(dataset_id: str, file_uuid: str, req: Request) -> {}:
         logging.error(f'The target {target} does not exist.')
     except OSError as e:
         logging.error(f'Error creating symlink: {e}')
+
+    db_manager.update_file(DataFile(dataset_id=dataset.id, name=file_name, checksum=sha1_hash,
+                                    size=file_size, mime_type=file_type,
+                                    path=dest_file_path, state=DataFileState.UPLOADED))
     all_files_uploaded = len(db_manager.find_registered_files(dataset.id)) == 0
     if all_files_uploaded:
         logging.info(f'All files are UPLOADED for {dataset.id}')
