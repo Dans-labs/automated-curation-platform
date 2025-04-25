@@ -451,7 +451,7 @@ def zip_with_progress(file_path, zip_path):
     logging.info(f"Zipping of '{file_path}' completed.")
 
 
-def delete_symlink_and_target(link_name):
+def delete_symlink_and_target(link_name) -> str|None:
     """
     Deletes a symbolic link and its target.
 
@@ -465,14 +465,22 @@ def delete_symlink_and_target(link_name):
     Returns:
     None
     """
+
     if os.path.islink(link_name):
         target = os.readlink(link_name)
         if os.path.isdir(target):
+            logging.error(f"'{link_name}' is a directory, but its contents aren't symlinks.")
             shutil.rmtree(target)
         else:
             os.remove(target)
+
         os.remove(link_name)
         logging.info(f'{link_name} and its target {target} DELETED successfully.')
+        return target
+    else:
+        logging.warn(f'{link_name} is not a symbolic link.')
+        os.remove(link_name)
+    return None
 
 def compress_zip_file(original_zip_path):
     """

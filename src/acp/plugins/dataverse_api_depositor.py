@@ -17,7 +17,7 @@ from src.acp.commons import (
     app_settings,
     transform,
     handle_deposit_exceptions, dmz_dataverse_headers, zip_a_zipfile_with_progress, transform_xml,
-    processed_metadata_handler, validate_json
+    processed_metadata_handler, validate_json, delete_symlink_and_target
 )
 from src.acp.db.dbz import StateVersion, DataFile, DepositStatus, MetadataType, AccessLevel, DataFileState
 from src.acp.models.bridge_output_model import IdentifierItem, IdentifierProtocol, TargetResponse, ResponseContentType
@@ -50,6 +50,7 @@ class DataverseIngester(Bridge):
     def job(self) -> TargetDataModel:
 
         target_repo_response = TargetResponse(url=self.target.target_url)
+        print("target_repo_response: ", target_repo_response)
         tdm = TargetDataModel(response=target_repo_response)
         dv_headers = dmz_dataverse_headers('API_KEY', self.target.password)
         if self.dataset_rec.metadata_type == MetadataType.JSON:
@@ -78,9 +79,6 @@ class DataverseIngester(Bridge):
                 if self.target.metadata.processed_metadata:
                     # When processed metadata is available, process the metadata
                     md_json = processed_metadata_handler(self.target.metadata.processed_metadata, md_json)
-                    # for pm in self.target.metadata.processed_metadata:
-                    #     pm.dir = f'{self.dataset_dir}/{pm.dir}' if pm.dir else self.dataset_dir
-                    #     processed_metadata_handler(pm, md_json)
 
                 for file in self.db_manager.find_non_registered_files(dataset_id=self.dataset_id):
                     escaped_file_name = file.name.replace('"', '\\"')
@@ -116,16 +114,11 @@ class DataverseIngester(Bridge):
         if self.target.target_url_params:
             self.target.target_url += "?" + self.target.target_url_params.replace("$PID", md_json["datasetVersion"]["datasetPersistentId"])
 
-        # Ingest the metadata into Dataverse
-        # The metadata is ingested first, and then the files are ingested.
-        # Check whether the dataset is new or not
-
         if self.dataset_rec.status == StateVersion.RESUBMIT:
             dv_response, pid = self.__process_resubmit_dataset(dv_headers, str_dv_metadata, str_updated_metadata,
                                                                target_repo_response, tdm)
             self.db_manager.delete_dataset_backups_by_dataset_id(self.dataset_id)
         else:
-            #This is a new dataset
             dv_response, pid = self.__process_submit_dataset(dv_headers, str_dv_metadata, str_updated_metadata,
                                                              target_repo_response, tdm)
 
@@ -157,7 +150,7 @@ class DataverseIngester(Bridge):
         pid = dv_response_json["data"]["persistentId"]
         self.__set_repo_identifiers(identifier_items, pid, target_repo_response)
         tdm.deposited_identifiers = identifier_items#json.dumps([i.model_dump() for i in identifier_items])
-        tdm.deposited_version = "DRAFT" # TODO: Check the version
+        tdm.deposited_version = "DRAFT" # TODO: Check the version:https://guides.dataverse.org/en/latest/api/native-api.html#datasets
         tdm.deposit_status = DepositStatus.FINISH
         if self.target.metadata and self.target.metadata.transformed_metadata:
             if self.dataset_rec.metadata_type == MetadataType.JSON:
@@ -166,7 +159,7 @@ class DataverseIngester(Bridge):
         if self.target.initial_release_version == StateVersion.PUBLISHED:
             logging.info('Publish the dataset')
             target_repo_response.status_code = self.__publish_dataset(pid, dv_headers)
-            # tdm.deposited_version = StateVersion.PUBLISHED
+            tdm.deposited_version = StateVersion.PUBLISHED
 
         return dv_response, pid
 
@@ -175,12 +168,7 @@ class DataverseIngester(Bridge):
                                                            target_name=self.target.repo_name)
         #Update status to submit:
         self.db_manager.update_dataset_status(dataset_id=self.dataset_id, state=StateVersion.SUBMIT)
-        tsr = json.loads(target_repo_rec.target_service_response)
-        pid = tsr["response"]["identifiers"][0]["value"]
-        identifier_items = []
-        self.__set_repo_identifiers(identifier_items, pid, target_repo_response)
-        tdm.deposited_identifiers = identifier_items#json.dumps([i.model_dump() for i in identifier_items])
-        tdm.deposited_version = tsr["deposited_metadata"]["data"]["latestVersion"]["versionState"]
+        pid = jmespath.search("[?protocol=='doi'].value | [0]", json.loads(target_repo_rec.deposited_identifiers))
         md_json = json.loads(str_dv_metadata)
         md_block_only = md_json["datasetVersion"]["metadataBlocks"]
         term_of_access = md_json["datasetVersion"]["termsOfAccess"]
@@ -195,6 +183,7 @@ class DataverseIngester(Bridge):
         # This is Resubmit
         dv_response_json = dv_response.json()
         logging.info(f"Data Resubmit successfully! {json.dumps(dv_response_json)}")
+        tdm.deposit_status = StateVersion.DRAFT
         tdm.deposit_status = DepositStatus.FINISH
         if self.target.metadata and self.target.metadata.transformed_metadata:
             self.__reingest_files(pid, str_updated_metadata, dv_headers)
@@ -268,17 +257,14 @@ class DataverseIngester(Bridge):
 
     def __reingest_files(self, pid: str, str_updated_metadata_json: str, headers) -> int:
         logging.info(f'Ingesting files to {pid}')
-
         str_dv_file = self.__transform_metadata_to_dataverse_json(str_updated_metadata_json,
                                                                   app_settings.get("DV_FILES", "dataset-files.json"))
         dv_file_json = json.loads(str_dv_file)
-
         #Get the files metadata from the latest version:
         dv_latest_version = requests.get(f'{self.target.base_url}/api/datasets/:persistentId/versions/:latest?persistentId={pid}',
                                      headers=headers)
         #TODO: Check status code
         dv_latest_version_json = dv_latest_version.json()
-        # print(json.dumps(dv_latest_version_json, indent=2))
         files_in_dv_target = dv_latest_version_json["data"]["files"]
         logging.info(f'Found {len(files_in_dv_target)} files in Remote Dataverse Target.')
         # Re-ingest generated files
@@ -340,6 +326,8 @@ class DataverseIngester(Bridge):
                     jsonData = json.loads(str_dv_file).get(file_element)
                     data = {"jsonData": json.dumps(jsonData)}
                     url_base = f"{self.target.base_url}/api/datasets/:persistentId/add?persistentId={pid}"
+                    if file_rec.mime_type == "application/zip":
+                        self.__handle_zip_file(file_rec, time.perf_counter())
                     with open(file_rec.path, 'rb') as f:
                         logging.debug(f"file_rec.path: {file_rec.path}. file_rec.name: {file_rec.name}.headers: {headers}")
                         files = {'file': (file_rec.name, f)}
@@ -352,28 +340,55 @@ class DataverseIngester(Bridge):
 
                         logging.info(f'File {file_rec.name} is successfully ingested. Response: {response_ingest_file.json()}')
                         self.__add_file_embargo(headers, jsonData, pid, response_ingest_file.json())
+                    self.__delete_file(file_rec)
 
     def replace_file_dv_target(self, file, file_id, file_rec, headers, pid, jsonData):
         start = time.perf_counter()
         jsonData["forceReplace"] = True
-        data = {"jsonData": json.dumps(jsonData)}
         url_base = f"{self.target.base_url}/api/files/{file_id}/replace"
         timeout_seconds = app_settings.get("DATAVERSE_RESPONSE_TIMEOUT", 360000)
+
         logging.info(f'Start ingesting file {file_rec.name}. Size: {file_rec.size}. Ingest to {url_base}')
         with open(file_rec.path, 'rb') as f:
-            files = {'file': (file_rec.name, f)}
-            response_ingest_file = requests.post(url_base, files=files, data=data, headers=headers,
-                                                 timeout=timeout_seconds)
-            if response_ingest_file.status_code != status.HTTP_200_OK:
-                logging.error(f'File {file_rec.name} is FAIL ingested. Response: {response_ingest_file.json()}')
-                raise ValueError(response_ingest_file.json())
-        logging.info(
-            f'Finish ingesting file {file_rec.name} to {pid} in {round(time.perf_counter() - start, 2)} seconds.')
+            response = requests.post(
+                url_base,
+                files={'file': (file_rec.name, f)},
+                data={"jsonData": json.dumps(jsonData)},
+                headers=headers,
+                timeout=timeout_seconds
+            )
 
+        if response.status_code != status.HTTP_200_OK:
+            logging.error(f'File {file_rec.name} failed to ingest. Response: {response.json()}')
+            raise ValueError(response.json())
+
+        logging.info(
+            f'Finished ingesting file {file_rec.name} to {pid} in {round(time.perf_counter() - start, 2)} seconds.')
+        self.__delete_file(file_rec)
+
+    def __delete_file(self, file_rec):
+        logging.debug(f'Deleting file: {file_rec.path}')
+
+        if file_rec.state == DataFileState.GENERATED:
+            os.remove(file_rec.path)
+            logging.debug(f'Deleted GENERATED file: {file_rec.path}')
+        else:
+            tus_file_path = delete_symlink_and_target(file_rec.path)
+            logging.debug(f'Actual file path: {tus_file_path}')
+            if tus_file_path:
+                self.__remove_tus_lock_file(file_rec.dataset_id, tus_file_path)
+
+    def __remove_tus_lock_file(self, dataset_id, tus_file_path):
+        tus_file_lock = tus_file_path.replace(f'-{dataset_id}.{self.app_name}', '.lock')
+        logging.debug(f'Lock file: {tus_file_lock}')
+        if os.path.exists(tus_file_lock):
+            os.remove(tus_file_lock)
+            logging.debug(f'Deleted lock file: {tus_file_lock}')
+        else:
+            logging.warning(f'Lock file not found: {tus_file_lock}')
 
     def __ingest_files(self, pid: str, str_updated_metadata_json: str, headers) -> int:
         logging.info(f'Ingesting files to {pid}')
-
         str_dv_file = self.__transform_metadata_to_dataverse_json(str_updated_metadata_json, app_settings.get("DV_FILES", "dataset-files.json"))
 
         for file in self.db_manager.find_non_registered_files(dataset_id=self.dataset_id):
@@ -382,27 +397,30 @@ class DataverseIngester(Bridge):
             if not jsonData:
                 continue
 
-            start = time.perf_counter()
+            start_timer = time.perf_counter()
             data = {"jsonData": json.dumps(jsonData)}
             if file.mime_type == "application/zip":
-                real_file_path = os.readlink(file.path)
-                zip_file_name = f'{os.path.dirname(real_file_path)}/{file.name}'
-                os.remove(file.path)
-                os.rename(real_file_path, zip_file_name)
-                logging.info(f'Start zipping file {file.name}. Real path: {zip_file_name}')
-                zip_a_zipfile_with_progress(zip_file_name, file.path)
-                os.remove(zip_file_name)
-                logging.info(f'Finished zipping file {file.name} to {real_file_path} in {round(time.perf_counter() - start, 2)} seconds')
+                self.__handle_zip_file(file, start_timer)
 
             url_base = f"{self.target.base_url}/api/datasets/:persistentId/add?persistentId={pid}"
             logging.info(f'Start ingesting file {file.name}. Size: {file.size}. Ingest to {url_base}')
             if file.size < app_settings.get("MAX_INGEST_SIZE_USING_PYTHON", 100000000):
                 logging.info(f'Ingest SMALL FILE using python: {file.name}')
                 with open(file.path, 'rb') as f:
-                    files = {'file': (file.name, f)}
-                    response_ingest_file = requests.post(url_base, files=files, data=data, headers=headers,
-                                                         timeout=app_settings.get("DATAVERSE_RESPONSE_TIMEOUT", 360000)).json()
-                    logging.info(f'File {file.name} is successfully ingested')
+                    response = requests.post(
+                        url_base,
+                        files={'file': (file.name, f)},
+                        data=data,
+                        headers=headers,
+                        timeout=app_settings.get("DATAVERSE_RESPONSE_TIMEOUT", 360000)
+                    )
+
+                if response.status_code != status.HTTP_200_OK:
+                    logging.error(f'File {file.name} failed to ingest. Response: {response.json()}')
+                    raise ValueError(response.json())
+
+                response_data = response.json()
+                logging.info(f'File {file.name} is successfully ingested')
             else:
                 logging.info(f'Ingest LARGE FILE using script: {file.name}')
                 jsonData_str = json.dumps(jsonData)
@@ -414,7 +432,7 @@ class DataverseIngester(Bridge):
                         check=True, text=True, capture_output=True
                     )
                     logging.info(f'File {file.name} is successfully ingested')
-                    response_ingest_file = json.loads(result.stdout)
+                    response_data = json.loads(result.stdout)
                 except subprocess.CalledProcessError as e:
                     logging.error(f'File {file.name} is FAIL ingested. Response: {e.stderr}')
                     raise ValueError(str(e.stderr))
@@ -422,24 +440,36 @@ class DataverseIngester(Bridge):
                     logging.error(f'File {file.name} is FAIL ingested. Response: {e}')
                     raise ValueError(str(e))
 
-            logging.info(f'Finish ingesting file {file.name} to {pid} in {round(time.perf_counter() - start, 2)} seconds.')
-            # self.db_manager.set_file_ingested(file.id)
+            logging.info(f'Finish ingesting file {file.name} to {pid} in {round(time.perf_counter() - start_timer, 2)} seconds.')
+            self.__delete_file(file)
+            self.__add_file_embargo(headers, jsonData, pid, response_data)
 
-            self.__add_file_embargo(headers, jsonData, pid, response_ingest_file)
+    def __handle_zip_file(self, file, start):
+        tus_real_file_path = os.readlink(file.path)
+        zip_file_name = f'{os.path.dirname(tus_real_file_path)}/{file.name}'
+        os.remove(file.path)
+        os.rename(tus_real_file_path, zip_file_name)
+        logging.info(f'Start zipping file {file.name}. Real path: {zip_file_name}')
+        zip_a_zipfile_with_progress(zip_file_name, file.path)
+        os.remove(zip_file_name)
+        logging.info(
+            f'Finished zipping file {file.name} of {tus_real_file_path} in {round(time.perf_counter() - start, 2)} seconds')
+        self.__remove_tus_lock_file(file.dataset_id, tus_real_file_path)
 
-    def __add_file_embargo(self, headers, jsonData, pid, response_ingest_file):
-        #TODO: According to Dataverse API, embargo can be in batch; so refactor this function
-        if jsonData.get('embargo'):
+    def __add_file_embargo(self, headers, jsonData, pid, response_data):
+        if 'embargo' in jsonData:
             json_data = {
-                'dateAvailable': jsonData.get('embargo'),
-                'reason': '', # TODO: It should be from user's form but right now, it is not available
-                'fileIds': [response_ingest_file['data']['files'][0]['dataFile']['id']],
+                'dateAvailable': jsonData['embargo'],
+                'reason': '',  # Placeholder for future user-provided reason
+                'fileIds': [response_data['data']['files'][0]['dataFile']['id']],
             }
-            response_embargo = requests.post(
-                f'{self.target.base_url}/api/datasets/:persistentId/files/actions/:set-embargo?persistentId={pid}',
-                headers=headers, json=json_data)
-            if response_embargo.status_code != status.HTTP_200_OK:
-                raise ValueError(response_embargo.text)
+            response = requests.post(
+                f"{self.target.base_url}/api/datasets/:persistentId/files/actions/:set-embargo?persistentId={pid}",
+                headers=headers,
+                json=json_data
+            )
+            if response.status_code != status.HTTP_200_OK:
+                raise ValueError(response.text)
 
     def __publish_dataset(self, pid, headers) -> int:
         return requests.post(
