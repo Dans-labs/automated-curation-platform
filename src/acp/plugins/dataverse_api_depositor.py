@@ -50,7 +50,6 @@ class DataverseIngester(Bridge):
     def job(self) -> TargetDataModel:
 
         target_repo_response = TargetResponse(url=self.target.target_url)
-        print("target_repo_response: ", target_repo_response)
         tdm = TargetDataModel(response=target_repo_response)
         dv_headers = dmz_dataverse_headers('API_KEY', self.target.password)
         if self.dataset_rec.metadata_type == MetadataType.JSON:
@@ -152,12 +151,12 @@ class DataverseIngester(Bridge):
         tdm.deposited_identifiers = identifier_items#json.dumps([i.model_dump() for i in identifier_items])
         tdm.deposited_version = "DRAFT" # TODO: Check the version:https://guides.dataverse.org/en/latest/api/native-api.html#datasets
         tdm.deposit_status = DepositStatus.FINISH
-        if self.target.metadata and self.target.metadata.transformed_metadata:
-            if self.dataset_rec.metadata_type == MetadataType.JSON:
-                self.__ingest_files(pid, str_updated_metadata, dv_headers)
-            logging.info('The dataset and its file is successfully ingested"')
+        if self.target.metadata and self.target.metadata.transformed_metadata and self.dataset_rec.metadata_type == MetadataType.JSON:
+            self.__ingest_files(pid, str_updated_metadata, dv_headers)
+            logging.info('The dataset and its file is successfully ingested.')
+
         if self.target.initial_release_version == StateVersion.PUBLISHED:
-            logging.info('Publish the dataset')
+            logging.info('Publishing the dataset...')
             target_repo_response.status_code = self.__publish_dataset(pid, dv_headers)
             tdm.deposited_version = StateVersion.PUBLISHED
 
@@ -279,7 +278,6 @@ class DataverseIngester(Bridge):
             else:
                 not_generated_file_in_dv_target.append(file)
 
-        # print(json.dumps(not_generated_file_in_dv_target, indent=2))
         for file in not_generated_file_in_dv_target:
             jsonData = json.loads(str_dv_file).get(file["dataFile"]["filename"])
             file_id = file["dataFile"]["id"]
