@@ -109,7 +109,7 @@ class TargetDataModel(BaseModel):
     deposit_status: Optional[DepositStatus] = Field(None, alias='deposit-status')
     payload: Optional[dict|str] = Field(None, alias='payload')
     deposited_metadata: Optional[dict|str] = Field(None, alias='deposited-metadata')  #
-    deposited_identifiers: Optional[Union[str,List[IdentifierItem]]] = Field(None, alias='deposited-identifiers')
+    external_identifiers: Optional[Union[str,List[IdentifierItem]]] = Field(None, alias='deposited-identifiers')
     deposited_version: Optional[str] = Field(default="", alias='deposited-version')
     response: TargetResponse = Field(default_factory=TargetResponse)
 

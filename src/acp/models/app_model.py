@@ -74,7 +74,7 @@ class TargetApp(BaseModel):
     deposited_at: datetime | str = Field(None, alias='deposit-time')
     deposit_duration: float|str = ''
     output_response: dict = Field(None, alias='output-response')
-    deposited_identifiers: Union[str,List[dict]] = Field(None, alias='deposited-identifiers')
+    external_identifiers: Union[str,List[dict]] = Field(None, alias='deposited-identifiers')
     diff: dict = {}
 
 

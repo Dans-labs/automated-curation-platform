@@ -469,17 +469,18 @@ def delete_symlink_and_target(link_name) -> str|None:
     if os.path.islink(link_name):
         target = os.readlink(link_name)
         if os.path.isdir(target):
-            logging.error(f"'{link_name}' is a directory, but its contents aren't symlinks.")
             shutil.rmtree(target)
         else:
             os.remove(target)
-
         os.remove(link_name)
-        logging.info(f'{link_name} and its target {target} DELETED successfully.')
+        logging.info(f"Deleted symlink '{link_name}' and its target '{target}'.")
         return target
+
+    if os.path.isdir(link_name):
+        shutil.rmtree(link_name)
     else:
-        logging.warn(f'{link_name} is not a symbolic link.')
         os.remove(link_name)
+    logging.warning(f"'{link_name}' is not a symlink but has been deleted.")
     return None
 
 def compress_zip_file(original_zip_path):
@@ -717,10 +718,10 @@ async def create_asset(dataset, db_manager, target_creds):
         # Parse the target repository output as JSON if available
         target_service_response_json = json.loads(target_repo_rec.target_service_response) if target_repo_rec.target_service_response else {}
         target_service_response_deposited_metadata = target_service_response_json.get('deposited_metadata')
-        target_repo_identifiers = target_repo_rec.deposited_identifiers
+        target_repo_identifiers = target_repo_rec.external_identifiers
         if target_repo_identifiers:
-            target_app.deposited_identifiers = json.loads(target_repo_identifiers) or []
-            api_url = target_app.deposited_identifiers[0].get("api-url") if target_app.deposited_identifiers else None
+            target_app.external_identifiers = target_repo_identifiers
+            api_url = target_app.external_identifiers[0].get("api-url") if target_app.external_identifiers else None
             target_app.diff = await compare_dv_json(
                 target_service_response_deposited_metadata,
                 target_repo_rec.name,

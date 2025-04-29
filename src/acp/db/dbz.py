@@ -20,6 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import (SQLModel, Field, Relationship, create_engine, Session,
                       select)
 from sqlalchemy.orm import selectinload
+from sqlmodel import JSON
 
 from src.acp.models.app_model import Asset, TargetApp
 
@@ -109,15 +110,18 @@ class TargetRepo(SQLModel, table=True):
     __tablename__ = "target_repo"
 
     id: int = Field(default=None, primary_key=True)
-    dataset_id: str = Field(foreign_key="dataset.id", index=True)
+    dataset_id: str = Field(sa_column=Column(ForeignKey("dataset.id", ondelete="CASCADE")))
     name: str = Field(index=True)
     display_name: str = Field(index=True)
     url: str
-    deposit_status: Optional[DepositStatus] = Field(default=DepositStatus.PREPARING)
+    deposit_status: Optional[DepositStatus] = Field(default=DepositStatus.PREPARING, index=True)
+    deposit_status_message: Optional[str] = None
+    # deposit_attempts: int = 0
+    # last_deposit_attempt: Optional[datetime] = None
     deposited_at: Optional[datetime]
     deposit_duration: float = 0.0
     deposited_version: Optional[str]
-    deposited_identifiers: Optional[str] = Field(default="", index=True)
+    external_identifiers: Optional[dict] = Field(default_factory=dict, sa_column=Column(JSON))
     configuration: str = ""
     target_service_response: Optional[str]
 
@@ -137,6 +141,12 @@ class TargetRepo(SQLModel, table=True):
         if self.target_service_response:
             self.target_service_response = cipher_suite.decrypt(self.target_service_response.encode()).decode()
 
+class IngestFileStatus(str, Enum):
+    UNKNOWN = "UNKNOWN"
+    PENDING = "PENDING"
+    IN_PROGRESS = "IN_PROGRESS"
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"
 
 class DataFileState(str, Enum):
     REGISTERED = "REGISTERED"
@@ -158,15 +168,19 @@ class DataFile(SQLModel, table=True):
     __tablename__ = "data_file"
 
     id: int = Field(primary_key=True)
-    dataset_id: str = Field(foreign_key="dataset.id", index=True)
+    dataset_id: str = Field(sa_column=Column(ForeignKey("dataset.id", ondelete="CASCADE")))
     name: str = Field(index=True)
-    path: Optional[str]
+    path: Optional[str]  = Field(index=True)
     size: Optional[int] = Field(sa_column=Column(BigInteger))
     mime_type: Optional[str]
     checksum: Optional[str]
     added_at: Optional[datetime]
     access_level: AccessLevel = Field(default=AccessLevel.PRIVATE)
     state: DataFileState = Field(default=DataFileState.REGISTERED)
+    ingest_status: IngestFileStatus = Field(default=IngestFileStatus.PENDING)
+    ingest_status_message: Optional[str] = None
+    ingested_at: Optional[datetime]
+    ingest_duration: Optional[float]
 
     dataset: Optional["Dataset"] = Relationship(back_populates="data_files")
 
@@ -508,6 +522,17 @@ class DatabaseManager:
                 .where(DataFile.dataset_id == dataset_id, DataFile.state == DataFileState.UPLOADED)
             ).all()
 
+    def update_dataset_metadata_content(self, dataset_id: str, metadata_content: str) -> Dataset:
+        with self.__db_session() as session:
+            ds_record = session.exec(select(Dataset).where(Dataset.id == dataset_id)).one_or_none()
+            if ds_record:
+                ds_record.metadata_content = metadata_content
+                ds_record.encrypt_metadata_content(self.cipher_suite)
+                session.add(ds_record)
+                session.commit()
+                session.refresh(ds_record)
+                return ds_record
+        return None
     def update_dataset(self, dataset: Dataset) -> Dataset:
         with self.__db_session() as session:
             ds_record = session.exec(select(Dataset).where(Dataset.id == dataset.id)).one_or_none()
@@ -546,8 +571,8 @@ class DatabaseManager:
             if target_repo_rec:
                 target_repo_rec.deposit_status = target_repo.deposit_status
                 target_repo_rec.deposited_version = target_repo.deposited_version
-                if target_repo.deposited_identifiers:
-                    target_repo_rec.deposited_identifiers = target_repo.deposited_identifiers
+                if target_repo.external_identifiers:
+                    target_repo_rec.external_identifiers = target_repo.external_identifiers
                 if target_repo.target_service_response:
                     target_repo_rec.target_service_response = target_repo.target_service_response
                     target_repo_rec.encrypt_target_service_response(self.cipher_suite)
@@ -580,6 +605,14 @@ class DatabaseManager:
                 f_record.size = df.size
                 f_record.checksum = df.checksum
                 f_record.state = df.state
+                if df.ingest_status:
+                    f_record.ingest_status = df.ingest_status
+                if df.ingested_at:
+                    f_record.ingested_at = df.ingested_at
+                if df.ingest_duration:
+                    f_record.ingest_duration = df.ingest_duration
+                if df.ingest_status_message:
+                    f_record.ingest_status_message = df.ingest_status_message
                 session.add(f_record)
                 session.commit()
                 session.refresh(f_record)
@@ -639,7 +672,7 @@ class DatabaseManager:
     def find_target_repo_by_indentifier(self, doi: str) -> Optional[TargetRepo]:
         with self.__db_session() as session:
             return session.exec(
-                select(TargetRepo).where(TargetRepo.deposited_identifiers.contains(doi))
+                select(TargetRepo).where(TargetRepo.external_identifiers.contains(doi))
             ).one_or_none()
 
     from sqlalchemy import text

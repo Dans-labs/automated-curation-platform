@@ -126,6 +126,7 @@ async def process_inbox(status, request):
     else:
         logging.info(f'Dataset already exist: {dataset_id}')
         dataset = db_manager.find_dataset_only_by_id(dataset_id)#TODO: Check if resubmit and the dataset is not found: error!
+        print(json.dumps(json.loads(dataset.metadata_content), indent=4))
 
     dataset_submission_ready = status in [StateVersion.SUBMIT, StateVersion.RESUBMIT]
     dataset_status = status if status in [StateVersion.DRAFT_RESUBMIT, StateVersion.SUBMIT, StateVersion.RESUBMIT] else dataset.status
@@ -146,7 +147,7 @@ async def process_inbox(status, request):
         for repo_rec in target_repo_recs:
             deposited_metadata = json.loads(repo_rec.target_service_response or "{}").get('deposited_metadata')
             if deposited_metadata:
-                api_url = json.loads(repo_rec.deposited_identifiers)[0]['api-url']
+                api_url = repo_rec.external_identifiers[0]['api-url']
                 diff = await compare_dv_json(deposited_metadata, repo_rec.name, json.loads(idh.target_creds), api_url)
                 if diff:
                     logging.error(f'Dataset {dataset_id} has changed on the server. Diff: {diff}')
@@ -295,7 +296,7 @@ def delete_dataset_and_its_folder(db_manager, dataset_id: str, app_name: str, de
         logging.info(f'Delete dataset folder: {dataset_folder}')
         shutil.rmtree(dataset_folder)
     else:
-        logging.error(f'Dataset folder: {dataset_folder} not found')
+        logging.warn(f'Dataset folder: {dataset_folder} not found')
 
     # Return a dictionary indicating the status of the deletion
     return {"status": "ok", "dataset-id": dataset_id}
@@ -663,7 +664,7 @@ def execute_bridges(db_manager, app_name, dataset_id:str) -> None:
         db_manager.update_dataset_status(dataset_id, StateVersion.SUBMITTED)
     else:
         logging.error(f'Ingest failed for datasetId: {dataset_id}')
-        db_manager.update_dataset_status(dataset_id, StateVersion.FAILED)
+        # db_manager.update_dataset_status(dataset_id, StateVersion.FAILED)
 
 
 #
@@ -863,7 +864,7 @@ async def create_dataset_form(url: str, req: Request):
     persistent_id = req.query_params.get('persistentId')
     target_repo_rec =  db_manager.find_target_repo_by_indentifier(persistent_id)
     if target_repo_rec:
-        target_repo_identifiers_json = json.loads(target_repo_rec.deposited_identifiers)
+        target_repo_identifiers_json = json.loads(target_repo_rec.external_identifiers)
         target_service_response_json = json.loads(
             target_repo_rec.target_service_response) if target_repo_rec.target_service_response else {}
         target_service_response_deposited_metadata = target_service_response_json.get('deposited_metadata')
