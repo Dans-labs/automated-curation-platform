@@ -403,11 +403,11 @@ class DataverseIngester(Bridge):
 
             url_base = f"{self.target.base_url}/api/datasets/:persistentId/add?persistentId={pid}"
             logging.info(f'Start ingesting file {file_rec.name}. Size: {file_rec.size}. Ingest to {url_base}')
+            file_rec.ingest_status = IngestFileStatus.IN_PROGRESS
+            file_rec.ingested_at = datetime.now(timezone.utc)
+            self.db_manager.update_file(file_rec)
             if file_rec.size < app_settings.get("MAX_INGEST_SIZE_USING_PYTHON", 100000000):
                 logging.info(f'Ingest SMALL FILE using python: {file_rec.name}')
-                file_rec.ingest_status = IngestFileStatus.IN_PROGRESS
-                file_rec.ingested_at = datetime.now(timezone.utc)
-                self.db_manager.update_file(file_rec)
                 with open(file_rec.path, 'rb') as f:
                     response = requests.post(
                         url_base,
@@ -424,12 +424,8 @@ class DataverseIngester(Bridge):
                     raise ValueError(response.json())
 
                 response_data = response.json()
-                msg = f'File {file_rec.name} is successfully ingested'
+                msg = f'File {file_rec.name} is successfully ingested, small file - using python'
                 logging.info(msg)
-                file_rec.ingest_status = IngestFileStatus.SUCCESS
-                file_rec.ingest_status_message = msg
-                file_rec.ingest_duration = round(time.perf_counter() - start_timer, 2)
-                self.db_manager.update_file(file_rec)
             else:
                 logging.info(f'Ingest LARGE FILE using script: {file_rec.name}')
                 jsonData_str = json.dumps(jsonData)
@@ -448,7 +444,11 @@ class DataverseIngester(Bridge):
                 except Exception as e:
                     logging.error(f'File {file_rec.name} is FAIL ingested. Response: {e}')
                     raise ValueError(str(e))
-
+                msg = f'File {file_rec.name} is successfully ingested, large file - using script'
+            file_rec.ingest_status = IngestFileStatus.SUCCESS
+            file_rec.ingest_status_message = msg
+            file_rec.ingest_duration = round(time.perf_counter() - start_timer, 2)
+            self.db_manager.update_file(file_rec)
             logging.info(f'Finish ingesting file {file_rec.name} to {pid} in {round(time.perf_counter() - start_timer, 2)} seconds.')
             self.__delete_file(file_rec)
             self.__add_file_embargo(headers, jsonData, pid, response_data)
