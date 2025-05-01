@@ -110,7 +110,7 @@ class SwhApiDepositor(Bridge):
                         ideni = IdentifierItem(value=swhid_dir, url=swhid_dir_url,
                                                protocol=IdentifierProtocol('swhid'))
                         identifier_items.append(ideni)
-                        tdm.deposited_identifiers = identifier_items
+                        tdm.external_identifiers = identifier_items
                         break
                     else:
                         goto_sleep = True
@@ -122,7 +122,7 @@ class SwhApiDepositor(Bridge):
             logging.error(f'ERROR api_resp.status_code: {api_resp.status_code}')
             target_response.status_code = api_resp.status_code
             tdm.deposit_status = DepositStatus.ERROR
-            target_response.error = json.dumps(api_resp.json())
+            target_response.error = str(api_resp.content)
             target_response.content_type = ResponseContentType.JSON
             target_response.url = swh_url
             target_response.content = json.dumps(api_resp.json())

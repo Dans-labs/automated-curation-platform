@@ -607,8 +607,8 @@ async def compare_dv_json(deposited_metadata, target_repo_name, target_creds, ap
             if dv_response.status_code == 200:
                 return Compare().check(deposited_metadata, dv_response.json())
             else:
-                logging.error(f'Error occurs: status code: {dv_response.status_code} from {api_url}')
-
+                logging.warning(f'Error occurs: status code: {dv_response.status_code} from {api_url}')
+                return {api_url: dv_response.status_code}
             break
 
 # DEZE FUNCTIES STAAN ERGENS IN JE FRAMEWORK BIJ HET INTERPRETEREN VAN BIJVOORBEELD aircore4eosc-swh_dev-dataverse_demo.json
@@ -727,7 +727,7 @@ async def create_asset(dataset, db_manager, target_creds):
                 target_repo_rec.name,
                 target_creds,
                 api_url
-            ) if api_url else {}
+            )
         else:
             target_app.output_response = {}
 
