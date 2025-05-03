@@ -1,6 +1,5 @@
 # Import necessary plugins and packages
 # Import necessary libraries and plugins
-import hashlib
 import json
 import logging
 import mimetypes
@@ -20,7 +19,7 @@ from fastapi import APIRouter, Request, HTTPException
 from src.acp.commons import (app_settings, data,
                              get_class, handle_ps_exceptions, \
                              send_mail, delete_symlink_and_target, retrieve_targets_configuration, get_repo_assistant,
-                             create_asset, compare_dv_json, dmz_dataverse_headers, base_dir)
+                             create_asset, compare_dv_json, dmz_dataverse_headers, base_dir, calculate_sha1_checksum)
 from src.acp.db.dbz import TargetRepo, DataFile, Dataset, StateVersion, DepositStatus, \
     MetadataType, AccessLevel, DataFileState
 from src.acp.models.app_model import ResponseDataModel, InboxDatasetDataModel
@@ -544,22 +543,6 @@ async def upload_file(dataset_id: str, file_uuid: str, req: Request) -> {}:
     rdm.dataset_id = str(dataset.id)
     rdm.start_process = start_process
     return rdm.model_dump(by_alias=True)
-
-def calculate_sha1_checksum(file_path: str) -> str:
-    """
-    Calculate the SHA-1 checksum of a file.
-
-    Args:
-        file_path (str): Path to the file.
-
-    Returns:
-        str: The SHA-1 checksum as a hexadecimal string.
-    """
-    with open(file_path, 'rb') as f:
-        sha1 = hashlib.sha1()
-        for chunk in iter(lambda: f.read(4096), b''):
-            sha1.update(chunk)
-    return sha1.hexdigest()
 
 
 def bridge_job(db_manager, app_name, dataset_id: str, msg: str) -> None:
