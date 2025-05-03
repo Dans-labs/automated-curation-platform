@@ -1,4 +1,5 @@
 import ast
+import hashlib
 import importlib
 import inspect
 import json
@@ -747,3 +748,20 @@ def validate_json(str_dv_metadata):
             logging.error(f"Retry failed: {e}")
             return None
     return str_dv_metadata
+
+
+def calculate_sha1_checksum(file_path: str) -> str:
+    """
+    Calculate the SHA-1 checksum of a file.
+
+    Args:
+        file_path (str): Path to the file.
+
+    Returns:
+        str: The SHA-1 checksum as a hexadecimal string.
+    """
+    with open(file_path, 'rb') as f:
+        sha1 = hashlib.sha1()
+        for chunk in iter(lambda: f.read(4096), b''):
+            sha1.update(chunk)
+    return sha1.hexdigest()
