@@ -117,15 +117,14 @@ async def process_inbox(status, request):
     logging.debug(f'Start inbox for metadata id: {dataset_id} - release version: {dataset_id} - assistant name: '
            f'{idh.assistant_name}')
 
-    if not db_manager.find_dataset_only_by_id(dataset_id):
+    dataset = db_manager.find_dataset_only_by_id(dataset_id)
+
+    if dataset:
+        logging.info(f'Dataset already exists: {dataset_id}')
+    else:
         logging.debug(f'Dataset does not exist: {dataset_id}')
         dataset = db_manager.create_initial_dataset_record(dataset_id, idh.owner_id, idh.title)
-        logging.info(f'Create a new dataset ID: {dataset.id}')
-
-    else:
-        logging.info(f'Dataset already exist: {dataset_id}')
-        dataset = db_manager.find_dataset_only_by_id(dataset_id)#TODO: Check if resubmit and the dataset is not found: error!
-        print(json.dumps(json.loads(dataset.metadata_content), indent=4))
+        logging.info(f'Created new dataset with ID: {dataset.id}')
 
     dataset_submission_ready = status in [StateVersion.SUBMIT, StateVersion.RESUBMIT]
     dataset_status = status if status in [StateVersion.DRAFT_RESUBMIT, StateVersion.SUBMIT, StateVersion.RESUBMIT] else dataset.status
@@ -145,15 +144,17 @@ async def process_inbox(status, request):
         )
         for repo_rec in target_repo_recs:
             deposited_metadata = json.loads(repo_rec.target_service_response or "{}").get('deposited_metadata')
-            if deposited_metadata:
-                api_url = repo_rec.external_identifiers[0]['api-url']
-                diff = await compare_dv_json(deposited_metadata, repo_rec.name, json.loads(idh.target_creds), api_url)
-                if diff:
-                    logging.error(f'Dataset {dataset_id} has changed on the server. Diff: {diff}')
-                    raise HTTPException(
-                        status_code=409,
-                        detail=f"Dataset {dataset_id} has changed on the server. Please check the diff: {diff}"
-                    )
+            if not deposited_metadata:
+                continue
+
+            api_url = repo_rec.external_identifiers[0]['api-url']
+            diff = await compare_dv_json(deposited_metadata, repo_rec.name, json.loads(idh.target_creds), api_url)
+            if diff:
+                logging.error(f"Dataset {dataset_id} has changed on the server. Diff: {diff}")
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Dataset {dataset_id} has changed on the server. Please check the diff: {diff}"
+                )
 
     db_record_metadata = Dataset(
         id=dataset_id,
