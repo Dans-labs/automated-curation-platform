@@ -862,3 +862,65 @@ class DatabaseManager:
             except Exception as e:
                 session.rollback()
                 raise e
+
+    def restore_data_file(self, dataset_id: str, filename: str) -> None:
+        with self.__db_session() as session:
+            try:
+                # Retrieve the backup record for the given dataset_id and filename
+                backup_record = session.exec(
+                    select(DatasetBackup)
+                    .where(DatasetBackup.dataset_id == dataset_id)
+                    .where(DatasetBackup.table_name == "data_file")
+                ).all()
+
+                if not backup_record:
+                    raise ValueError(f"No backup record found for dataset_id: {dataset_id} and filename: {filename}")
+
+                # Filter the backup records to find the one matching the filename
+                for record in backup_record:
+                    record_data = json.loads(record.record_data)
+                    if record_data.get("name") == filename:
+                        # Convert datetime fields
+                        record_data["added_at"] = datetime.fromisoformat(record_data["added_at"])
+
+                        # Create a DataFile instance
+                        restored_file = DataFile(**record_data)
+
+                        # Insert the restored record into the data_file table
+                        session.add(restored_file)
+                        session.commit()
+                        logging.info(f"Successfully restored file '{filename}' for dataset '{dataset_id}'")
+                        return
+
+                raise ValueError(f"File '{filename}' not found in backup records for dataset_id: {dataset_id}")
+
+            except Exception as e:
+                session.rollback()
+                logging.error(f"Failed to restore file '{filename}' for dataset '{dataset_id}': {e}")
+                raise e
+
+    def delete_pending_data_file(self, dataset_id: str, name: str, checksum: str) -> None:
+        with self.__db_session() as session:
+            try:
+                # Query the DataFile record with the given criteria
+                file_record = session.exec(
+                    select(DataFile)
+                    .where(
+                        DataFile.dataset_id == dataset_id,
+                        DataFile.name == name,
+                        DataFile.checksum == checksum,
+                        DataFile.ingest_status == IngestFileStatus.PENDING
+                    )
+                ).one_or_none()
+
+                # If the record exists, delete it
+                if file_record:
+                    session.delete(file_record)
+                    session.commit()
+                    logging.info(f"Deleted DataFile '{name}' with checksum '{checksum}' from dataset '{dataset_id}'")
+                else:
+                    logging.warning(f"No matching DataFile found for dataset_id: {dataset_id}, name: {name}, checksum: {checksum}, and ingest_status: PENDING")
+            except Exception as e:
+                session.rollback()
+                logging.error(f"Failed to delete DataFile '{name}' for dataset '{dataset_id}': {e}")
+                raise e
