@@ -177,20 +177,22 @@ async def process_inbox(status, request):
     os.makedirs(dataset_dir, exist_ok=True)
 
     registered_files, file_submission_ready = process_registered_files(db_manager, dataset.id, idh, dataset_dir)
-    if dataset_submission_ready and file_submission_ready:
-        db_manager.set_dataset_ready_for_ingest(dataset.id, True)
+    db_manager.set_dataset_ready_for_ingest(dataset.id, dataset_submission_ready and file_submission_ready)
 
     logging.debug(f"Registered files: {registered_files}")
     logging.debug(f"Dataset ready: {dataset_submission_ready}, File state: {file_submission_ready}")
     process_db_records_registered_files(db_manager, dataset.id, registered_files)
 
-    if status != StateVersion.DRAFT and db_manager.is_dataset_ready(dataset.id) and db_manager.are_files_uploaded(dataset.id):
-        logging.debug(f'SUBMIT DATASET with version {status.name} is_dataset_ready {dataset.id}')
+    if status != StateVersion.DRAFT and db_manager.is_dataset_ready(dataset.id) and db_manager.are_files_uploaded(
+            dataset.id):
+        logging.debug(f"SUBMIT DATASET with version {status.name} is_dataset_ready {dataset.id}")
         bridge_job(db_manager, repo_assistant.app_name, dataset.id, f"/inbox/dataset/{idh.status}")
     else:
-        logging.debug(f'NOT READY to submit dataset with version {status.name} dataset_id: {dataset.id} '
-               f'\nNumber still registered: {len(db_manager.find_registered_files(dataset.id))}')
-        # Create the ResponseDataModel with the required dataset_id
+        num_registered = len(db_manager.find_registered_files(dataset.id))
+        logging.debug(f"NOT READY to submit dataset with version {status.name} dataset_id: {dataset.id}, "
+                      f"Number still registered: {num_registered}")
+
+    # Create the ResponseDataModel with the required dataset_id
     rdm = ResponseDataModel(status="OK")
     rdm.dataset_id = str(dataset.id)
     rdm.start_process = db_manager.is_dataset_ready(dataset.id)
@@ -316,37 +318,31 @@ def process_db_records_registered_files(db_manager, dataset_id, registered_files
 
 @handle_ps_exceptions
 def process_registered_files(db_manager, dataset_id, idh, tmp_dir):
-    file_submission_ready = True
     registered_files = []
-    if idh.metadata_type == MetadataType.JSON:
-        logging.debug('Processing json metadata')
-        file_names = []
-        file_names_from_input = jmespath.search('"file-metadata"[*].name', idh.metadata_content)
-        if file_names_from_input:
-            for file_name in file_names_from_input:
-                data_file = db_manager.find_file_by_name(dataset_id, file_name)
-                if data_file:
-                    logging.info(f'File {file_name} already exist')
-                    escaped_file_name = file_name.replace('"', '\\"')
-                    f_permission = jmespath.search(f'"file-metadata"[?name == `{escaped_file_name}`].private', idh.metadata_content)
-                    permission = AccessLevel.PRIVATE if f_permission[0] else AccessLevel.PUBLIC
-                    db_manager.update_file_access_level(dataset_id, file_name, permission)
-                    continue
-                else:
-                    file_names.append(file_name)
-        else:
-            file_names_from_input = []
+    file_submission_ready = True
 
+    if idh.metadata_type == MetadataType.JSON:
+        logging.debug('Processing JSON metadata')
+
+        # Extract file names from input metadata
+        file_names_from_input = jmespath.search('"file-metadata"[*].name', idh.metadata_content) or []
+        file_names = [
+            file_name for file_name in file_names_from_input
+            if not db_manager.find_file_by_name(dataset_id, file_name)
+        ]
+
+        # Log file counts
         logging.info(f'Number of file_names: {len(file_names)}')
         already_uploaded_files_name = db_manager.execute_l(dataset_id)
         logging.info(f'Number of already_uploaded_files: {len(already_uploaded_files_name)}')
 
+        # Determine files to delete and add
         files_name_to_be_deleted = set(already_uploaded_files_name) - set(file_names_from_input)
-        logging.info(
-            f'Number of files_name_to_be_deleted: {len(files_name_to_be_deleted)} --LIST:  {files_name_to_be_deleted}')
         files_name_to_be_added = set(file_names) - set(already_uploaded_files_name)
+        logging.info(f'Number of files_name_to_be_deleted: {len(files_name_to_be_deleted)}')
         logging.info(f'Number of files_name_to_be_added: {len(files_name_to_be_added)}')
 
+        # Delete files
         for f_name in files_name_to_be_deleted:
             file_path = os.path.join(tmp_dir, f_name)
             if os.path.exists(file_path):
@@ -356,21 +352,18 @@ def process_registered_files(db_manager, dataset_id, idh, tmp_dir):
                 logging.info(f'{file_path} not found')
             db_manager.delete_datafile(dataset_id, f_name)
 
+        # Add new files
         for f_name in files_name_to_be_added:
             file_path = os.path.join(tmp_dir, f_name)
-            # Escape special characters in the filename
             escaped_filename = f_name.replace('"', '\\"')
-
             f_permission = jmespath.search(f'"file-metadata"[?name == `{escaped_filename}`].private', idh.metadata_content)
-            permission = AccessLevel.PRIVATE if f_permission[0] else AccessLevel.PUBLIC
+            permission = AccessLevel.PRIVATE if f_permission and f_permission[0] else AccessLevel.PUBLIC
             registered_files.append(DataFile(name=f_name, path=file_path, access_level=permission))
 
         logging.info(f'registered_files: {registered_files}')
 
-        # Update file permission
-        already_uploaded_files = db_manager.find_uploaded_files(dataset_id)
-        logging.info(f'Number of already_uploaded_files: {len(already_uploaded_files)}')
-        file_submission_ready = True if not files_name_to_be_added else False
+        # Check if all files are uploaded
+        file_submission_ready = not files_name_to_be_added
 
     return registered_files, file_submission_ready
 
