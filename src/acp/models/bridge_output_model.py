@@ -107,6 +107,7 @@ class TargetDataModel(BaseModel):
     """
     deposit_time: Optional[str] = Field(datetime.now(timezone.utc).isoformat(), alias='deposit-time')
     deposit_status: Optional[DepositStatus] = Field(None, alias='deposit-status')
+    deposit_status_message: Optional[str] = Field(None, alias='deposit-status-message')
     payload: Optional[dict|str] = Field(None, alias='payload')
     deposited_metadata: Optional[dict|str] = Field(None, alias='deposited-metadata')  #
     external_identifiers: Optional[Union[str,List[IdentifierItem]]] = Field(None, alias='deposited-identifiers')
