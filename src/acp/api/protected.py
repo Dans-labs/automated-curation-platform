@@ -260,47 +260,44 @@ async def delete_dataset_metadata(request: Request, dataset_id: str, status: Opt
     raise HTTPException(status_code=404, detail=f'Delete of {dataset.id} is not allowed.')
 
 
-def delete_dataset_and_its_folder(db_manager, dataset_id: str, app_name: str, delete_dataset: bool = True) -> {}:
+import os
+import shutil
+import logging
+
+def delete_dataset_and_its_folder(db_manager, dataset_id: str, app_name: str, delete_dataset: bool = True) -> dict:
     """
     Delete a dataset and its associated folder.
 
-    This function deletes the dataset identified by the given metadata ID and its associated folder.
-    It first checks if the dataset folder exists and deletes it if found. It then deletes the dataset
-    record from the database and checks again if the folder exists to ensure it is removed.
-
     Args:
-        db_manager: The database manager instance used to interact with the database.
-        dataset_id (str): The ID of the dataset metadata to be deleted.
-        app_name (str): The name of the application associated with the dataset.
-        delete_dataset (bool): A flag indicating whether to delete the dataset record from the database.
-                               Defaults to True.
+        db_manager: Database manager instance.
+        dataset_id (str): ID of the dataset to delete.
+        app_name (str): Application name associated with the dataset.
+        delete_dataset (bool): Whether to delete the dataset record from the database. Defaults to True.
 
     Returns:
-        dict: A dictionary containing the status of the deletion and the metadata ID.
+        dict: Status of the deletion and the dataset ID.
     """
-    # Construct the path to the dataset folder
     dataset_folder = os.path.join(app_settings.DATA_TMP_BASE_DIR, app_name, str(dataset_id))
-    logging.info(f'Delete dataset folder: {dataset_folder}')
+    logging.info(f'Deleting dataset folder: {dataset_folder}')
 
-    # Check if the dataset folder exists and delete it if found
+    # Delete the dataset folder if it exists
     if os.path.exists(dataset_folder):
         delete_symlink_and_target(dataset_folder)
     else:
-        logging.error(f'Dataset folder: {dataset_folder} not found')
+        logging.warning(f'Dataset folder not found: {dataset_folder}')
 
-    # If delete_dataset is True, delete the dataset record from the database
+    # Delete the dataset record if required
     if delete_dataset:
-        logging.info(f'Delete dataset: {dataset_id}')
+        logging.info(f'Deleting dataset record: {dataset_id}')
         db_manager.delete_by_dataset_id(dataset_id)
 
-    # Check again if the dataset folder exists and remove it to ensure it is deleted
+    # Ensure the dataset folder is removed
     if os.path.exists(dataset_folder):
-        logging.info(f'Delete dataset folder: {dataset_folder}')
         shutil.rmtree(dataset_folder)
+        logging.info(f'Dataset folder removed: {dataset_folder}')
     else:
-        logging.warn(f'Dataset folder: {dataset_folder} not found')
+        logging.warning(f'Dataset folder already removed: {dataset_folder}')
 
-    # Return a dictionary indicating the status of the deletion
     return {"status": "ok", "dataset-id": dataset_id}
 
 @handle_ps_exceptions
@@ -372,72 +369,68 @@ def process_target_repos(repo_assistant, target_creds) -> [TargetRepo]:
     """
     Process target repositories for a given assistant.
 
-    This function processes the target repositories for the given assistant by validating
-    the target credentials and updating the repository configuration.
-
     Args:
-        repo_assistant (RepoAssistantDataModel): The assistant data model containing target repository information.
-        target_creds (str): A JSON string containing the target credentials.
+        repo_assistant (RepoAssistantDataModel): Assistant data model with target repository info.
+        target_creds (str): JSON string containing target credentials.
 
     Returns:
-        list[TargetRepo]: A list of TargetRepo objects representing the processed target repositories.
+        list[TargetRepo]: List of processed TargetRepo objects.
 
     Raises:
-        HTTPException: If a specified bridge plugin class is not found in the data keys.
+        HTTPException: If a specified bridge plugin class is not found.
     """
-    db_recs_target_repo = []
     tgc = {"targets-credentials": json.loads(target_creds)}
     input_target_cred_model = TargetsCredentialsModel.model_validate(tgc)
+    db_recs_target_repo = []
+
     for repo_target in repo_assistant.targets:
-        if repo_target.bridge_plugin_name not in data.keys():
+        if repo_target.bridge_plugin_name not in data:
             msg = f'Module "{repo_target.bridge_plugin_name}" not found.'
             logging.error(msg)
-            raise HTTPException(status_code=404, detail=msg, headers={})
-        target_repo_name = repo_target.repo_name
-        logging.info(f'target_repo_name: {target_repo_name}')
-        for depositor_cred in input_target_cred_model.targets_credentials:
-            if (depositor_cred.target_repo_name == repo_target.repo_name and depositor_cred.credentials and
-                    depositor_cred.credentials.username):
-                repo_target.username = depositor_cred.credentials.username
-            if (depositor_cred.target_repo_name == repo_target.repo_name and depositor_cred.credentials and
-                    depositor_cred.credentials.password):
-                repo_target.password = depositor_cred.credentials.password
+            raise HTTPException(status_code=404, detail=msg)
 
-        db_recs_target_repo.append(TargetRepo(name=repo_target.repo_name, url=repo_target.target_url,
-                                              display_name=repo_target.repo_display_name,
-                                              configuration=repo_target.model_dump_json(by_alias=True, exclude_none=True)))
+        # Update credentials for the repository target
+        for depositor_cred in input_target_cred_model.targets_credentials:
+            if depositor_cred.target_repo_name == repo_target.repo_name and depositor_cred.credentials:
+                repo_target.username = depositor_cred.credentials.username or repo_target.username
+                repo_target.password = depositor_cred.credentials.password or repo_target.password
+
+        # Append the processed repository target
+        db_recs_target_repo.append(TargetRepo(
+            name=repo_target.repo_name,
+            url=repo_target.target_url,
+            display_name=repo_target.repo_display_name,
+            configuration=repo_target.model_dump_json(by_alias=True, exclude_none=True)
+        ))
+
     return db_recs_target_repo
 
 
 async def delete_file(file_id: str):
     logging.info(f"Deleting file {file_id}")
-    url = f'{app_settings.TUS_BASE_URL}/files/{file_id}'
+    url = f"{app_settings.TUS_BASE_URL}/files/{file_id}"
     headers = {
         "accept": "application/json",
         "Authorization": f"Bearer {app_settings.ACP_SERVICE_API_KEY}"
     }
-    async with httpx.AsyncClient() as client:
-        try:
+
+    try:
+        async with httpx.AsyncClient() as client:
             response = await client.delete(url, headers=headers, timeout=10)
             if response.status_code == 204:
-                logging.info(f"TUS File  successfully deleted. {file_id}")
+                logging.info(f"TUS File successfully deleted: {file_id}")
             else:
-                logging.info(f"File id: {file_id} Failed to delete file. Status code: {response.status_code}")
-
+                logging.info(f"Failed to delete file {file_id}. Status code: {response.status_code}")
             return response.status_code
-        except Exception as e:
-            logging.error(f"File id: {file_id} Error deleting file: {e}")
-
+    except Exception as e:
+        logging.error(f"Error deleting file {file_id}: {e}")
         return 500
 
 
 @router.patch("/inbox/files/{dataset_id}/{file_uuid}")
-async def upload_file(dataset_id: str, file_uuid: str, req: Request) -> {}:
+async def upload_file(dataset_id: str, file_uuid: str, req: Request) -> dict:
     """
     Endpoint to update file metadata.
-
-    This endpoint updates the metadata of a file identified by the given metadata ID and file UUID.
-    It processes the file, creates a symlink, and updates the database with the new file information.
 
     Args:
         dataset_id (str): The ID of the dataset metadata.
@@ -445,11 +438,6 @@ async def upload_file(dataset_id: str, file_uuid: str, req: Request) -> {}:
 
     Returns:
         dict: A dictionary containing the status and the dataset ID.
-
-    Raises:
-        HTTPException: If the file info or file is not found.
-        HTTPException: If the file size is 0.
-        HTTPException: If there is a file size mismatch.
     """
     logging.debug(f'upload_file - dataset_id: {dataset_id}')
 
@@ -457,7 +445,7 @@ async def upload_file(dataset_id: str, file_uuid: str, req: Request) -> {}:
     repo_assistant = await get_repo_assistant(req)
     db_manager = data[repo_assistant.app_name]
 
-    # Fetch dataset and log metadata processing
+    # Fetch dataset
     dataset = db_manager.find_dataset_by_id(dataset_id)
     logging.info(f'PATCH file metadata for dataset_id: {dataset_id}, file_uuid: {file_uuid}')
 
@@ -466,77 +454,51 @@ async def upload_file(dataset_id: str, file_uuid: str, req: Request) -> {}:
     file_info_path = f'{tus_file}.info'
 
     # Validate file existence and size
-    if not all(map(os.path.exists, [file_info_path, tus_file])):
+    if not os.path.exists(file_info_path) or not os.path.exists(tus_file):
         missing_file = file_info_path if not os.path.exists(file_info_path) else tus_file
-        logging.error(f'File NOT FOUND: {missing_file}')
-        raise HTTPException(status_code=404, detail='File not found')
-
+        raise HTTPException(status_code=404, detail=f'File not found: {missing_file}')
     if os.path.getsize(tus_file) == 0:
-        logging.error(f'File SIZE IS 0: {tus_file}')
         raise HTTPException(status_code=400, detail='File size is 0')
 
+    # Load file metadata
     with open(file_info_path, "r") as file:
         file_metadata = json.load(file)
     file_name = file_metadata['metadata']['fileName']
-    if file_metadata.get('size', 0) == 0:
-        logging.error(f'File SIZE IS 0 for {file_uuid}: {tus_file}')
-        raise HTTPException(status_code=400, detail='File size is 0')
-
-    logging.info(f'file_name: {file_name}')
-    if os.path.getsize(tus_file) != file_metadata.get('size', 0):
-        logging.error(f'FILE SIZE MISMATCH for {file_uuid}: {tus_file}')
+    file_size = file_metadata.get('size', 0)
+    if file_size == 0 or os.path.getsize(tus_file) != file_size:
         raise HTTPException(status_code=400, detail='File size mismatch')
 
+    # Prepare file paths and metadata
     dataset_folder = os.path.join(app_settings.DATA_TMP_BASE_DIR, repo_assistant.app_name, str(dataset.id))
-    source_file_path = os.path.join(app_settings.DATA_TMP_BASE_TUS_FILES_DIR, file_uuid)
     dest_file_path = os.path.join(dataset_folder, file_name)
     file_type = file_metadata['metadata'].get('filetype', mimetypes.guess_type(dest_file_path)[0])
-    file_size = os.path.getsize(source_file_path)
-    sha1_hash = calculate_sha1_checksum(source_file_path)
-    # Process the files
-    logging.info(f'Processing using symlink {source_file_path} to {dest_file_path}')
-    target = source_file_path
-    link_name = dest_file_path
+    sha1_hash = calculate_sha1_checksum(tus_file)
+
+    # Process the file
     try:
-        new_name = f'{target}-{dataset_id}.{repo_assistant.app_name}'
-        os.rename(target, new_name)
-        os.symlink(new_name, link_name)
-        logging.info(f'Symlink created: {link_name} -> {target}')
-        logging.info(f'Deleting {source_file_path}.info')
-        deleted_status = await delete_file(file_uuid)
-        logging.info(f'Deleted status of file uuid: {file_uuid} is {deleted_status}')
-    except FileExistsError:
-        logging.error(f'The symlink {link_name} already exists.')
-    except FileNotFoundError:
-        logging.error(f'The target {target} does not exist.')
-    except OSError as e:
-        logging.error(f'Error creating symlink: {e}')
+        new_name = f'{tus_file}-{dataset_id}.{repo_assistant.app_name}'
+        os.rename(tus_file, new_name)
+        os.symlink(new_name, dest_file_path)
+        await delete_file(file_uuid)
+    except (FileExistsError, FileNotFoundError, OSError) as e:
+        logging.error(f'Error processing file: {e}')
 
-    db_manager.update_file(DataFile(dataset_id=dataset.id, name=file_name, checksum=sha1_hash,
-                                    size=file_size, mime_type=file_type,
-                                    path=dest_file_path, state=DataFileState.UPLOADED))
+    # Update database
+    db_manager.update_file(DataFile(
+        dataset_id=dataset.id, name=file_name, checksum=sha1_hash,
+        size=file_size, mime_type=file_type, path=dest_file_path, state=DataFileState.UPLOADED
+    ))
     all_files_uploaded = len(db_manager.find_registered_files(dataset.id)) == 0
-    if all_files_uploaded:
-        logging.info(f'All files are UPLOADED for {dataset.id}')
-        db_manager.set_dataset_ready_for_ingest(dataset_id, True)
-    else:
-        db_manager.set_dataset_ready_for_ingest(dataset_id, False)
-        logging.info(f'Not all files uploaded for metadata_id: {dataset_id} dataset_id: {dataset_id}')
+    db_manager.set_dataset_ready_for_ingest(dataset_id, all_files_uploaded)
 
-    start_process = db_manager.is_dataset_ready(dataset_id)
-    if start_process:
-        logging.info(f'Start Bridge task for {dataset_id} from the PATCH file endpoint')
+    # Start bridge job if ready
+    if db_manager.is_dataset_ready(dataset_id):
         bridge_job(db_manager, repo_assistant.app_name, dataset.id, f'/inbox/files/{dataset.id}/{file_uuid}')
-        logging.info(f'Bridge task for {dataset.id} started successfully')
-    else:
-        logging.info(f'Bridge task for {dataset.id} NOT started')
 
-    registerd_files = db_manager.find_registered_files(dataset.id)
-    logging.info(f'Number of registered files: {len(registerd_files)}')
-    rdm = ResponseDataModel(status="OK")
-    rdm.dataset_id = str(dataset.id)
-    rdm.start_process = start_process
-    return rdm.model_dump(by_alias=True)
+    # Return response
+    return ResponseDataModel(
+        status="OK", dataset_id=str(dataset.id), start_process=db_manager.is_dataset_ready(dataset_id)
+    ).model_dump(by_alias=True)
 
 
 def bridge_job(db_manager, app_name, dataset_id: str, msg: str) -> None:
