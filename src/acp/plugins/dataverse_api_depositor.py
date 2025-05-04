@@ -203,7 +203,7 @@ class DataverseIngester(Bridge):
         tdm.deposit_status = StateVersion.DRAFT
         tdm.deposit_status = DepositStatus.FINISH
         if self.target.metadata and self.target.metadata.transformed_metadata:
-            self.__reingest_files(pid, str_updated_metadata, dv_headers)
+            self.__resubmit_handle_files(pid, str_updated_metadata, dv_headers)
         return dv_response, pid
 
     def __set_repo_identifiers(self, identifier_items, pid, target_repo):
@@ -275,7 +275,7 @@ class DataverseIngester(Bridge):
 
         return generated_files, files_metadata
 
-    def __reingest_files(self, pid: str, str_updated_metadata_json: str, headers) -> int:
+    def __resubmit_handle_files(self, pid: str, str_updated_metadata_json: str, headers) -> int:
         logging.info(f'Ingesting files to {pid}')
         str_dv_file = self.__transform_metadata_to_dataverse_json(str_updated_metadata_json,
                                                                   app_settings.get("DV_FILES", "dataset-files.json"))
@@ -285,11 +285,11 @@ class DataverseIngester(Bridge):
                                      headers=headers)
         #TODO: Check status code
         dv_latest_version_json = dv_latest_version.json()
-        files_in_dv_target = dv_latest_version_json["data"]["files"]
-        logging.info(f'Found {len(files_in_dv_target)} files in Remote Dataverse Target.')
+        files_in_dv_latest_version_json = dv_latest_version_json["data"]["files"]
+        logging.info(f'Found {len(files_in_dv_latest_version_json)} files in Remote Dataverse Target.')
 
-        non_generated_file_in_dv_target = self.__resubmit_collect_non_generated_files_on_dv_target(dv_file_json, files_in_dv_target,
-                                                                                                   headers, pid, str_dv_file)
+        non_generated_file_in_dv_target = self.__resubmit_collect_non_generated_files_in_dv_latest_version_json(dv_file_json, files_in_dv_latest_version_json,
+                                                                                                                headers, pid, str_dv_file)
 
         self.__resubmit_handle_non_generated_files_on_dv_target(dv_file_json, headers, non_generated_file_in_dv_target,
                                                                 pid, str_dv_file)
@@ -301,58 +301,65 @@ class DataverseIngester(Bridge):
         for file in non_generated_file_in_dv_target:
             jsonData = json.loads(str_dv_file).get(file["dataFile"]["filename"])
             file_id = file["dataFile"]["id"]
-            # Check whether file is deleted in the database
             file_rec = self.db_manager.find_file_by_name(self.dataset_id, file["dataFile"]["filename"])
+
             if not file_rec:
-                logging.info(f'File {file["dataFile"]["filename"]} is deleted in the database. So delete in Dataverse')
-                delete_response = requests.delete(f'{self.target.base_url}/api/files/{file["dataFile"]["id"]}',
-                                                  headers=headers)
-                logging.info(
-                    f"delete_response.status_code: {delete_response.status_code} delete_response.text: {delete_response.text}")
+                logging.info(f'File {file["dataFile"]["filename"]} deleted in the database. Deleting in Dataverse.')
+                delete_response = requests.delete(f'{self.target.base_url}/api/files/{file_id}', headers=headers)
+                logging.info(f"Delete response: {delete_response.status_code} - {delete_response.text}")
             else:
-                # update the dv_file_json
                 dv_file_json[file["dataFile"]["filename"]]["processed"] = True
-                logging.info(
-                    f'File {file["dataFile"]["filename"]} is not deleted in the database. So, check whether it is updated')
-                # Check whether file is updated
                 if file_rec.checksum != file["dataFile"]["checksum"]["value"]:
-                    logging.info(f'File {file["dataFile"]["filename"]} is updated in the database. So re-ingest it')
-                    # Re-ingest the file
+                    logging.info(f'File {file["dataFile"]["filename"]} updated in the database. Re-ingesting.')
                     self.replace_file_dv_target(file_id, file_rec, headers, pid, jsonData)
                 else:
-                    # Update only the file metadata
-                    logging.warning(f'Dataverse bug? De Dataverse update metadata file is not working.'
-                                    f' So, file {file["dataFile"]["filename"]} is not updated in the database.')
-
-                    data = {"jsonData": str(json.dumps(jsonData))}
-                    url_base = f"{self.target.base_url}/api/files/{file_id}/metadata"
-                    response_update_file = requests.post(url_base, files=data, headers=headers)
+                    logging.debug(f'The checksum is the same. So, no need to re-ingest the file {file_rec.name}')
+                    logging.debug(f'Updating metadata for {file_rec.name}')
+                    data = {"jsonData": json.dumps(jsonData)}
+                    response_update_file = requests.post(f"{self.target.base_url}/api/files/{file_id}/metadata",
+                                                         files=data, headers=headers)
                     if response_update_file.status_code != status.HTTP_200_OK:
                         logging.error(
-                            f'File {file_rec.name} is FAIL metadata updated. Response: {response_update_file.reason}')
+                            f'Failed to update metadata for {file_rec.name}. Response: {response_update_file.reason}')
                         raise ValueError(response_update_file.json())
-                    logging.info(f'File {file_rec.name} is successfully metadata updated')
-                if 'embargo' in jsonData:
-                    self.__modify_file_embargo(headers, jsonData, pid, file)
+                    logging.info(f'Metadata updated for {file_rec.name}.')
 
-    def __resubmit_collect_non_generated_files_on_dv_target(self, dv_file_json, files_in_dv_target, headers, pid, str_dv_file):
+                logging.info(f'Handling embargo for {file_rec.name}')
+                embargo_remote = file.get("dataFile", {}).get("embargo", {}).get('dateAvailable')
+                embargo_form = jsonData.get("embargo")
+                if embargo_form != embargo_remote:
+                    logging.info(f'The embargo date is different. embargo_form: {embargo_form}, embargo_remote: {embargo_remote}')
+                    if embargo_form=='':
+                        if embargo_remote:
+                            logging.info(f'Embargo removed for {file_rec.name}.')
+                            self.__remove_dv_file_embargo(headers, pid, file)
+                    else:
+                        logging.debug(f'Embargo updated for {file_rec.name}.')
+                        self.__modify_file_embargo(headers, jsonData, pid, file)
+                else:
+                    logging.info(f'The embargo date is the same. So, no need to update the file {file_rec.name}')
+
+
+    def __resubmit_collect_non_generated_files_in_dv_latest_version_json(self, dv_file_json, files_in_dv_latest_version_json, headers
+                                                                         , pid, str_dv_file):
         # Re-ingest generated files
         non_generated_file_in_dv_target = []
-        for file in files_in_dv_target:
-            jsonData = json.loads(str_dv_file).get(file["dataFile"]["filename"])
-            if "__generated__files" in file.get("categories", []):
-                dv_file_json[file["dataFile"]["filename"]]["processed"] = True
-                file_id = file["dataFile"]["id"]
-                file_rec = self.db_manager.find_file_by_name(self.dataset_id, file["dataFile"]["filename"])
-                if file_rec.checksum != file["dataFile"]["checksum"]["value"]:
+        for file_in_dv_latest_version_json in files_in_dv_latest_version_json:
+            jsonData = json.loads(str_dv_file).get(file_in_dv_latest_version_json["dataFile"]["filename"])
+            if "__generated__files" in file_in_dv_latest_version_json.get("categories", []):
+                dv_file_json[file_in_dv_latest_version_json["dataFile"]["filename"]]["processed"] = True
+                file_id = file_in_dv_latest_version_json["dataFile"]["id"]
+                file_rec = self.db_manager.find_file_by_name(self.dataset_id,
+                                                             file_in_dv_latest_version_json["dataFile"]["filename"])
+                if file_rec.checksum != file_in_dv_latest_version_json["dataFile"]["checksum"]["value"]:
                     self.replace_file_dv_target(file_id, file_rec, headers, pid, jsonData)
                 else:
                     logging.info(f"The checksum is the same. So, no need to re-ingest the file {file_rec.name}")
-                    self.db_manager.restore_data_file(self.dataset_id, file["dataFile"]["filename"])
-                    self.db_manager.delete_pending_data_file(self.dataset_id, file["dataFile"]["filename"],
-                                                             file["dataFile"]["checksum"]["value"])
+                    self.db_manager.restore_data_file(self.dataset_id, file_in_dv_latest_version_json["dataFile"]["filename"])
+                    self.db_manager.delete_pending_data_file(self.dataset_id, file_in_dv_latest_version_json["dataFile"]["filename"],
+                                                             file_in_dv_latest_version_json["dataFile"]["checksum"]["value"])
             else:
-                non_generated_file_in_dv_target.append(file)
+                non_generated_file_in_dv_target.append(file_in_dv_latest_version_json)
         return non_generated_file_in_dv_target
 
     def __resubmit_ingest_new_files(self, dv_file_json, headers, pid, str_dv_file):
@@ -569,3 +576,22 @@ class DataverseIngester(Bridge):
             f"{self.target.base_url}/api/datasets/:persistentId/actions/:publish?persistentId={pid}&type=major",
             headers=headers,
         ).status_code
+
+    def __remove_dv_file_embargo(self, headers, pid, file):
+        file_id = file['dataFile']['id']
+        logging.debug(f'Removing embargo for file: {file_id}')
+
+        if file.get("dataFile", {}).get("embargo", {}).get('dateAvailable'):
+            data = {"fileIds": [file_id]}
+            response = requests.post(
+                f"{self.target.base_url}/api/datasets/:persistentId/files/actions/:unset-embargo?persistentId={pid}",
+                headers=headers,
+                data=json.dumps(data),
+            )
+            if response.status_code == status.HTTP_200_OK:
+                logging.info(f'Embargo successfully removed for file {file_id}. Response: {response.text}')
+            else:
+                logging.error(f'Failed to remove embargo for file {file_id}. Response: {response.text}')
+                raise ValueError(response.text)
+        else:
+            logging.info(f'No embargo found for file {file_id}. No action taken.')
