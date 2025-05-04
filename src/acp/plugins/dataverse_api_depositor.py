@@ -62,39 +62,8 @@ class DataverseIngester(Bridge):
                 self.dataset_rec.metadata_content = json.dumps(md_json, indent=2)
                 self.db_manager.update_dataset(self.dataset_rec)
 
-            # Handle metadata transformations and updates
-            if self.target.metadata:
-                files_metadata = jmespath.search('"file-metadata"[*]', md_json)
+            md_json, str_updated_metadata = self.__handle_metadata_transformation(md_json)
 
-                # When transformed metadata is available, transform the metadata
-                # Add generated files to the metadata
-                if self.target.metadata.transformed_metadata:
-                    generated_files, files_metadata = self.__create_generated_files(files_metadata)
-                    files_metadata.extend({"name": gf.name,
-                        "mimetype": gf.mime_type,
-                        "private": gf.access_level == AccessLevel.PRIVATE,
-                        "size": gf.size,
-                        "state": "generated"
-                    } for gf in generated_files)
-
-                    if generated_files:
-                        self.db_manager.insert_datafiles(self.dataset_id, generated_files)
-
-                    md_json["file-metadata"] = files_metadata
-
-                if self.target.metadata.processed_metadata:
-                    # When processed metadata is available, process the metadata
-                    md_json = processed_metadata_handler(self.target.metadata.processed_metadata, md_json)
-
-                for file in self.db_manager.find_non_registered_files(dataset_id=self.dataset_id):
-                    escaped_file_name = file.name.replace('"', '\\"')
-                    file_metadata = jmespath.search(f'[?name == `{escaped_file_name}`]', files_metadata)
-                    file_metadata[0].update({"mimetype": file.mime_type, "size": file.size})
-
-            str_updated_metadata = json.dumps(md_json, indent=4)
-            self.dataset_rec.metadata_content = str_updated_metadata
-
-            self.db_manager.update_dataset(self.dataset_rec)
         else:
             str_updated_metadata = self.dataset_rec.metadata_content
 
@@ -143,6 +112,40 @@ class DataverseIngester(Bridge):
 
         tdm.response = target_repo_response
         return tdm
+
+    def __handle_metadata_transformation(self, md_json):
+        # Handle metadata transformations and updates
+        if self.target.metadata:
+            files_metadata = jmespath.search('"file-metadata"[*]', md_json)
+
+            # When transformed metadata is available, transform the metadata
+            # Add generated files to the metadata
+            if self.target.metadata.transformed_metadata:
+                generated_files, files_metadata = self.__create_generated_files(files_metadata)
+                files_metadata.extend({"name": gf.name,
+                                       "mimetype": gf.mime_type,
+                                       "private": gf.access_level == AccessLevel.PRIVATE,
+                                       "size": gf.size,
+                                       "state": "generated"
+                                       } for gf in generated_files)
+
+                if generated_files:
+                    self.db_manager.insert_datafiles(self.dataset_id, generated_files)
+
+                md_json["file-metadata"] = files_metadata
+
+            if self.target.metadata.processed_metadata:
+                # When processed metadata is available, process the metadata
+                md_json = processed_metadata_handler(self.target.metadata.processed_metadata, md_json)
+
+            for file in self.db_manager.find_non_registered_files(dataset_id=self.dataset_id):
+                escaped_file_name = file.name.replace('"', '\\"')
+                file_metadata = jmespath.search(f'[?name == `{escaped_file_name}`]', files_metadata)
+                file_metadata[0].update({"mimetype": file.mime_type, "size": file.size})
+        str_updated_metadata = json.dumps(md_json, indent=4)
+        self.dataset_rec.metadata_content = str_updated_metadata
+        self.db_manager.update_dataset(self.dataset_rec)
+        return md_json, str_updated_metadata
 
     def __process_submit_dataset(self, dv_headers, str_dv_metadata, str_updated_metadata, target_repo_response, tdm):
         logging.info(f'Process submitting metadata {self.dataset_id} to {self.target.target_url}')
@@ -284,37 +287,33 @@ class DataverseIngester(Bridge):
         dv_latest_version_json = dv_latest_version.json()
         files_in_dv_target = dv_latest_version_json["data"]["files"]
         logging.info(f'Found {len(files_in_dv_target)} files in Remote Dataverse Target.')
-        # Re-ingest generated files
-        not_generated_file_in_dv_target = []
-        for file in files_in_dv_target:
-            jsonData = json.loads(str_dv_file).get(file["dataFile"]["filename"])
-            if "__generated__files" in file.get("categories", []):
-                dv_file_json[file["dataFile"]["filename"]]["processed"] = True
-                file_id = file["dataFile"]["id"]
-                file_rec = self.db_manager.find_file_by_name(self.dataset_id, file["dataFile"]["filename"])
-                if file_rec.checksum != file["dataFile"]["checksum"]["value"]:
-                    self.replace_file_dv_target(file_id, file_rec, headers, pid, jsonData)
-                else:
-                    logging.info(f"The checksum is the same. So, no need to re-ingest the file {file_rec.name}")
-                    self.db_manager.restore_data_file(self.dataset_id, file["dataFile"]["filename"])
-                    self.db_manager.delete_pending_data_file(self.dataset_id, file["dataFile"]["filename"], file["dataFile"]["checksum"]["value"])
-            else:
-                not_generated_file_in_dv_target.append(file)
 
-        for file in not_generated_file_in_dv_target:
+        non_generated_file_in_dv_target = self.__resubmit_collect_non_generated_files_on_dv_target(dv_file_json, files_in_dv_target,
+                                                                                                   headers, pid, str_dv_file)
+
+        self.__resubmit_handle_non_generated_files_on_dv_target(dv_file_json, headers, non_generated_file_in_dv_target,
+                                                                pid, str_dv_file)
+
+        self.__resubmit_ingest_new_files(dv_file_json, headers, pid, str_dv_file)
+
+    def __resubmit_handle_non_generated_files_on_dv_target(self, dv_file_json, headers, non_generated_file_in_dv_target,
+                                                           pid, str_dv_file):
+        for file in non_generated_file_in_dv_target:
             jsonData = json.loads(str_dv_file).get(file["dataFile"]["filename"])
             file_id = file["dataFile"]["id"]
             # Check whether file is deleted in the database
             file_rec = self.db_manager.find_file_by_name(self.dataset_id, file["dataFile"]["filename"])
             if not file_rec:
                 logging.info(f'File {file["dataFile"]["filename"]} is deleted in the database. So delete in Dataverse')
-                delete_response = requests.delete(f'{self.target.base_url}/api/files/{file["dataFile"]["id"]}', headers=headers)
+                delete_response = requests.delete(f'{self.target.base_url}/api/files/{file["dataFile"]["id"]}',
+                                                  headers=headers)
                 logging.info(
                     f"delete_response.status_code: {delete_response.status_code} delete_response.text: {delete_response.text}")
             else:
-                #update the dv_file_json
+                # update the dv_file_json
                 dv_file_json[file["dataFile"]["filename"]]["processed"] = True
-                logging.info(f'File {file["dataFile"]["filename"]} is not deleted in the database. So, check whether it is updated')
+                logging.info(
+                    f'File {file["dataFile"]["filename"]} is not deleted in the database. So, check whether it is updated')
                 # Check whether file is updated
                 if file_rec.checksum != file["dataFile"]["checksum"]["value"]:
                     logging.info(f'File {file["dataFile"]["filename"]} is updated in the database. So re-ingest it')
@@ -327,15 +326,37 @@ class DataverseIngester(Bridge):
 
                     data = {"jsonData": str(json.dumps(jsonData))}
                     url_base = f"{self.target.base_url}/api/files/{file_id}/metadata"
-                    response_update_file = requests.post(url_base,  files=data, headers=headers)
+                    response_update_file = requests.post(url_base, files=data, headers=headers)
                     if response_update_file.status_code != status.HTTP_200_OK:
-                        logging.error(f'File {file_rec.name} is FAIL metadata updated. Response: {response_update_file.reason}')
+                        logging.error(
+                            f'File {file_rec.name} is FAIL metadata updated. Response: {response_update_file.reason}')
                         raise ValueError(response_update_file.json())
                     logging.info(f'File {file_rec.name} is successfully metadata updated')
                 if 'embargo' in jsonData:
                     self.__modify_file_embargo(headers, jsonData, pid, file)
 
-        #now ingest new files
+    def __resubmit_collect_non_generated_files_on_dv_target(self, dv_file_json, files_in_dv_target, headers, pid, str_dv_file):
+        # Re-ingest generated files
+        non_generated_file_in_dv_target = []
+        for file in files_in_dv_target:
+            jsonData = json.loads(str_dv_file).get(file["dataFile"]["filename"])
+            if "__generated__files" in file.get("categories", []):
+                dv_file_json[file["dataFile"]["filename"]]["processed"] = True
+                file_id = file["dataFile"]["id"]
+                file_rec = self.db_manager.find_file_by_name(self.dataset_id, file["dataFile"]["filename"])
+                if file_rec.checksum != file["dataFile"]["checksum"]["value"]:
+                    self.replace_file_dv_target(file_id, file_rec, headers, pid, jsonData)
+                else:
+                    logging.info(f"The checksum is the same. So, no need to re-ingest the file {file_rec.name}")
+                    self.db_manager.restore_data_file(self.dataset_id, file["dataFile"]["filename"])
+                    self.db_manager.delete_pending_data_file(self.dataset_id, file["dataFile"]["filename"],
+                                                             file["dataFile"]["checksum"]["value"])
+            else:
+                non_generated_file_in_dv_target.append(file)
+        return non_generated_file_in_dv_target
+
+    def __resubmit_ingest_new_files(self, dv_file_json, headers, pid, str_dv_file):
+        # now ingest new files
         for file_element in dv_file_json:
             already_processed = dv_file_json[file_element].get("processed", False)
             if not already_processed:
@@ -352,13 +373,15 @@ class DataverseIngester(Bridge):
                     file_rec.ingested_at = datetime.now(timezone.utc)
                     self.db_manager.update_file(file_rec)
                     with open(file_rec.path, 'rb') as f:
-                        logging.debug(f"file_rec.path: {file_rec.path}. file_rec.name: {file_rec.name}.headers: {headers}")
+                        logging.debug(
+                            f"file_rec.path: {file_rec.path}. file_rec.name: {file_rec.name}.headers: {headers}")
                         files = {'file': (file_rec.name, f)}
                         response_ingest_file = requests.post(url_base, files=files, data=data, headers=headers,
                                                              timeout=app_settings.get("DATAVERSE_RESPONSE_TIMEOUT",
                                                                                       360000))
                         if response_ingest_file.status_code != status.HTTP_200_OK:
-                            logging.error(f'File {file_rec.name} is FAIL ingested. Response: {response_ingest_file.json()}')
+                            logging.error(
+                                f'File {file_rec.name} is FAIL ingested. Response: {response_ingest_file.json()}')
                             raise ValueError(response_ingest_file.json())
 
                         msg = f'File {file_rec.name} is successfully ingested to {pid}, small file - using python'
@@ -368,7 +391,8 @@ class DataverseIngester(Bridge):
                         file_rec.ingest_duration = round(time.perf_counter() - start_timer, 2)
                         self.db_manager.update_file(file_rec)
 
-                        logging.info(f'File {file_rec.name} is successfully ingested. Response: {response_ingest_file.json()}')
+                        logging.info(
+                            f'File {file_rec.name} is successfully ingested. Response: {response_ingest_file.json()}')
                         if 'embargo' in jsonData:
                             self.__add_file_embargo(headers, jsonData, pid, response_ingest_file.json())
                     self.__delete_file(file_rec)
@@ -499,16 +523,20 @@ class DataverseIngester(Bridge):
                 self.__add_file_embargo(headers, jsonData, pid, response_data)
 
     def __handle_zip_file(self, file, start):
-        logging.debug(f'handle zip file: {file.path}')
+        logging.debug(f'Handling zip file: {file.path}')
         tus_real_file_path = os.readlink(file.path)
-        zip_file_name = f'{os.path.dirname(tus_real_file_path)}/{file.name}'
+        zip_file_name = os.path.join(os.path.dirname(tus_real_file_path), file.name)
+
+        # Replace symlink with the actual file
         os.remove(file.path)
         os.rename(tus_real_file_path, zip_file_name)
-        logging.info(f'Start zipping file {file.name}. Real path: {zip_file_name}')
+
+        # Zip the file and clean up
+        logging.info(f'Starting to zip file: {zip_file_name}')
         zip_a_zipfile_with_progress(zip_file_name, file.path)
         os.remove(zip_file_name)
-        logging.info(
-            f'Finished zipping file {file.name} of {tus_real_file_path} in {round(time.perf_counter() - start, 2)} seconds')
+
+        logging.info(f'Finished zipping file {file.name} in {round(time.perf_counter() - start, 2)} seconds')
         self.__remove_tus_lock_file(file.dataset_id, tus_real_file_path)
 
     def __add_file_embargo(self, headers, jsonData, pid, response_data):
