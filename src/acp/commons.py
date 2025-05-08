@@ -607,10 +607,13 @@ async def compare_dv_json(deposited_metadata, target_repo_name, target_creds, ap
 
             if dv_response.status_code == 200:
                 return Compare().check(deposited_metadata, dv_response.json())
+            elif dv_response.status_code == 404:
+                logging.warning(f'Error occurs: status code: {dv_response.status_code} from {api_url}')
+                return {"data": {"latestVersion": 404}}
             else:
                 logging.warning(f'Error occurs: status code: {dv_response.status_code} from {api_url}')
                 return {api_url: dv_response.status_code}
-            break
+
 
 # DEZE FUNCTIES STAAN ERGENS IN JE FRAMEWORK BIJ HET INTERPRETEREN VAN BIJVOORBEELD aircore4eosc-swh_dev-dataverse_demo.json
 
