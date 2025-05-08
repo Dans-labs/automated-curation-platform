@@ -260,10 +260,6 @@ async def delete_dataset_metadata(request: Request, dataset_id: str, status: Opt
     raise HTTPException(status_code=404, detail=f'Delete of {dataset.id} is not allowed.')
 
 
-import os
-import shutil
-import logging
-
 def delete_dataset_and_its_folder(db_manager, dataset_id: str, app_name: str, delete_dataset: bool = True) -> dict:
     """
     Delete a dataset and its associated folder.
@@ -488,12 +484,16 @@ async def upload_file(dataset_id: str, file_uuid: str, req: Request) -> dict:
         dataset_id=dataset.id, name=file_name, checksum=sha1_hash,
         size=file_size, mime_type=file_type, path=dest_file_path, state=DataFileState.UPLOADED
     ))
+
     all_files_uploaded = len(db_manager.find_registered_files(dataset.id)) == 0
     db_manager.set_dataset_ready_for_ingest(dataset_id, all_files_uploaded)
 
     # Start bridge job if ready
     if db_manager.is_dataset_ready(dataset_id):
+        logging.info(f'All files are uploaded. Dataset ready for ingest: {dataset_id}')
         bridge_job(db_manager, repo_assistant.app_name, dataset.id, f'/inbox/files/{dataset.id}/{file_uuid}')
+    else:
+        logging.info(f'Not all files are uploaded. Dataset {dataset_id} is not ready for ingestion.')
 
     # Return response
     return ResponseDataModel(

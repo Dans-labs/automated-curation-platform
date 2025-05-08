@@ -57,6 +57,7 @@ class DataverseIngester(Bridge):
             md_json = json.loads(self.dataset_rec.metadata_content)
 
             if self.target.input:
+                logging.info(f'Processing input: {self.target.input}')
                 prev_target = self.db_manager.find_target_repo(self.dataset_id, self.target.input.from_target_name)
                 md_json[self.target.input.from_target_name] = json.loads(prev_target.target_service_response)['response']['identifiers'][0]['value']
                 self.dataset_rec.metadata_content = json.dumps(md_json, indent=2)
@@ -142,7 +143,7 @@ class DataverseIngester(Bridge):
                 escaped_file_name = file.name.replace('"', '\\"')
                 file_metadata = jmespath.search(f'[?name == `{escaped_file_name}`]', files_metadata)
                 file_metadata[0].update({"mimetype": file.mime_type, "size": file.size})
-        str_updated_metadata = json.dumps(md_json, indent=4)
+        str_updated_metadata = json.dumps(md_json)
         self.dataset_rec.metadata_content = str_updated_metadata
         self.db_manager.update_dataset(self.dataset_rec)
         return md_json, str_updated_metadata
@@ -192,7 +193,7 @@ class DataverseIngester(Bridge):
         license_only = md_json["datasetVersion"]["license"]
         construct_new_dv = {"license": license_only, "termsOfAccess": term_of_access, "fileAccessRequest": True,
                             "metadataBlocks": md_block_only}
-        str_updated_new_dv = json.dumps(construct_new_dv, indent=2)
+        str_updated_new_dv = json.dumps(construct_new_dv)
         update_url = f'{self.target.base_url}/api/datasets/:persistentId/versions/:draft?persistentId={pid}'
         logging.info(f"Update {update_url} with dv_json: {str_updated_new_dv}")
         dv_response = requests.put(update_url, headers=dv_headers, data=str_updated_new_dv)
@@ -236,7 +237,7 @@ class DataverseIngester(Bridge):
                     str_tobe_transformed=str_updated_metadata_json
                 )
 
-                logging.info(f"TRANSFORMED str_dv_metadata: {str_updated_metadata_json}")
+                logging.debug(f"TRANSFORMED str_dv_metadata: {str_updated_metadata_json}")
 
                 str_dv_metadata = validate_json(str_dv_metadata)
                 if not str_dv_metadata:
