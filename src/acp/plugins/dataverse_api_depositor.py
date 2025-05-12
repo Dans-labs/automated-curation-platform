@@ -68,7 +68,7 @@ class DataverseIngester(Bridge):
         else:
             str_updated_metadata = self.dataset_rec.metadata_content
 
-        logging.info(f"str_updated_metadata_json: {str_updated_metadata}")
+        logging.debug(f"str_updated_metadata_json: {str_updated_metadata}")
 
         # The metadata will be transformed if name is "dataset-metadata.json" and the transformed metadata is available.
         try:
@@ -83,7 +83,7 @@ class DataverseIngester(Bridge):
             tdm.payload = json.loads(str_dv_metadata)
             # TOOD tdm.payload for other than json metadata
 
-        logging.info(f'deposit to "{self.target.target_url}"')
+        logging.info(f'Deposit to "{self.target.target_url}"')
         # If the target URL has parameters, replace the placeholder with the dataset PID. It corresponds to the repoassistant configuration.
         # "target-url-params": "pid=$PID&release=no",
         if self.target.target_url_params:
@@ -108,7 +108,7 @@ class DataverseIngester(Bridge):
         if dv_resp_deposited.status_code == 200:
             tdm.deposited_metadata = dv_resp_deposited.json()
         else:
-            logging.info(f"Error: {dv_resp_deposited.text} status code: {dv_resp_deposited.status_code}")
+            logging.error(f"Error: {dv_resp_deposited.text} status code: {dv_resp_deposited.status_code}")
             pass #TODO: Handle this case
 
         tdm.response = target_repo_response
@@ -159,10 +159,10 @@ class DataverseIngester(Bridge):
             tdm.deposit_status_message = msg
             return dv_response, None
 
-        logging.info(f"dv_response.status_code: {dv_response.status_code} dv_response.text: {dv_response.text}")
+        logging.debug(f"dv_response.status_code: {dv_response.status_code} dv_response.text: {dv_response.text}")
         identifier_items = []
         dv_response_json = dv_response.json()
-        logging.info(f"Data ingest successfully! {json.dumps(dv_response_json)}")
+        logging.debug(f"Data ingest successfully! {json.dumps(dv_response_json)}")
         pid = dv_response_json["data"]["persistentId"]
         self.__set_repo_identifiers(identifier_items, pid, target_repo_response)
         tdm.external_identifiers = identifier_items#json.dumps([i.model_dump() for i in identifier_items])
@@ -195,12 +195,19 @@ class DataverseIngester(Bridge):
                             "metadataBlocks": md_block_only}
         str_updated_new_dv = json.dumps(construct_new_dv)
         update_url = f'{self.target.base_url}/api/datasets/:persistentId/versions/:draft?persistentId={pid}'
-        logging.info(f"Update {update_url} with dv_json: {str_updated_new_dv}")
+        logging.debug(f"Update {update_url} with dv_json: {str_updated_new_dv}")
         dv_response = requests.put(update_url, headers=dv_headers, data=str_updated_new_dv)
         # TODO: Check status code, then handle the case
         # This is Resubmit
         dv_response_json = dv_response.json()
-        logging.info(f"Data Resubmit successfully! {json.dumps(dv_response_json)}")
+        if dv_response.status_code != status.HTTP_200_OK:
+            msg = f"Error: {dv_response.status_code} {dv_response.text}"
+            logging.error(msg)
+            tdm.deposit_status = DepositStatus.ERROR
+            tdm.deposit_status_message = msg
+            raise ValueError(dv_response.json())
+
+        logging.info(f"Metadata Resubmit of '{self.dataset_id}' successfully!")
         tdm.deposit_status = StateVersion.DRAFT
         tdm.deposit_status = DepositStatus.FINISH
         if self.target.metadata and self.target.metadata.transformed_metadata:
@@ -222,7 +229,7 @@ class DataverseIngester(Bridge):
             transformer = [metadata for metadata in self.target.metadata.transformed_metadata if
                            metadata.name == json_data_name]
             if not transformer or len(transformer) != 1:
-                logging.info("Error: Transformer not found or more than one transformer")
+                logging.error("Error: Transformer not found or more than one transformer")
                 #Skip transformation
                 return str_updated_metadata_json
                 # raise ValueError(f"Error: Transformer '{json_data_name}' not found or more than one transformer")
@@ -241,7 +248,7 @@ class DataverseIngester(Bridge):
 
                 str_dv_metadata = validate_json(str_dv_metadata)
                 if not str_dv_metadata:
-                    logging.info(f"Error: Not valid json: {str_dv_metadata}")
+                    logging.error(f"Error: Not valid json: {str_dv_metadata}")
                     raise ValueError("Error: Not valid json")
             else:
                 str_dv_metadata = str_updated_metadata_json
@@ -307,7 +314,7 @@ class DataverseIngester(Bridge):
             if not file_rec:
                 logging.info(f'File {file["dataFile"]["filename"]} deleted in the database. Deleting in Dataverse.')
                 delete_response = requests.delete(f'{self.target.base_url}/api/files/{file_id}', headers=headers)
-                logging.info(f"Delete response: {delete_response.status_code} - {delete_response.text}")
+                logging.debug(f"Delete response: {delete_response.status_code} - {delete_response.text}")
             else:
                 dv_file_json[file["dataFile"]["filename"]]["processed"] = True
                 if file_rec.checksum != file["dataFile"]["checksum"]["value"]:
@@ -398,9 +405,10 @@ class DataverseIngester(Bridge):
                         file_rec.ingest_status_message = msg
                         file_rec.ingest_duration = round(time.perf_counter() - start_timer, 2)
                         self.db_manager.update_file(file_rec)
-
-                        logging.info(
+                        logging.debug(
                             f'File {file_rec.name} is successfully ingested. Response: {response_ingest_file.json()}')
+                        logging.info(
+                            f'File {file_rec.name} is successfully ingested.')
                         if 'embargo' in jsonData:
                             self.__add_file_embargo(headers, jsonData, pid, response_ingest_file.json())
                     self.__delete_file(file_rec)
@@ -590,7 +598,8 @@ class DataverseIngester(Bridge):
                 data=json.dumps(data),
             )
             if response.status_code == status.HTTP_200_OK:
-                logging.info(f'Embargo successfully removed for file {file_id}. Response: {response.text}')
+                logging.info(f'Embargo successfully removed for file {file_id}')
+                logging.debug(f'Embargo successfully removed for file {file_id}. Response: {response.text}')
             else:
                 logging.error(f'Failed to remove embargo for file {file_id}. Response: {response.text}')
                 raise ValueError(response.text)
