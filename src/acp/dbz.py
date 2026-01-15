@@ -14,6 +14,8 @@ from sqlmodel import SQLModel, Field, create_engine, Session, select
 
 from src.acp.models.app_model import Asset, TargetApp
 
+logger = logging.getLogger(__name__)
+
 '''
 import logging
 logging.basicConfig()
@@ -154,6 +156,51 @@ class DataFile(SQLModel, table=True):
     state: DataFileWorkState = DataFileWorkState.REGISTERED
 
 
+def _make_connection_url(db_dialect: str, db_url: str) -> str:
+    """
+    Compose a proper SQLAlchemy connection URL from dialect and URL parts.
+    
+    Handles multiple configuration styles:
+    - Full URL in db_url (e.g., "postgresql+psycopg2://user:pass@host/db")
+    - Dialect + URL parts for SQLite (e.g., "sqlite" + "///path/to/db")
+    - Dialect + URL parts for PostgreSQL (e.g., "postgresql+psycopg2" + "//user:pass@host/db")
+    
+    Args:
+        db_dialect: Database dialect (e.g., 'sqlite', 'postgresql+psycopg2')
+        db_url: Database URL or URL suffix
+        
+    Returns:
+        Properly formatted SQLAlchemy connection URL
+    """
+    # If db_url already contains the scheme (dialect://...), return it as-is
+    if "://" in db_url:
+        logger.info(f"Using full connection URL from db_url (dialect will be ignored)")
+        return db_url
+    
+    # If dialect is empty, assume db_url is a complete URL
+    if not db_dialect:
+        logger.info(f"No dialect specified, using db_url as complete connection URL")
+        return db_url
+    
+    # For SQLite, the format is sqlite:///path (triple slash for absolute path)
+    # db_url should be like "///path/to/db" or "///{env}/path/to/db"
+    if db_dialect.startswith("sqlite"):
+        conn_url = f"{db_dialect}:{db_url}"
+        logger.info(f"Composed SQLite connection URL (dialect: {db_dialect})")
+        return conn_url
+    
+    # For other databases (PostgreSQL, MySQL, etc.), format is dialect://user:pass@host:port/dbname
+    # db_url should be like "//user:pass@host:port/dbname"
+    if db_url.startswith("//"):
+        conn_url = f"{db_dialect}:{db_url}"
+    else:
+        # If db_url doesn't start with //, add it
+        conn_url = f"{db_dialect}://{db_url.lstrip('/')}"
+    
+    logger.info(f"Composed connection URL (dialect: {db_dialect})")
+    return conn_url
+
+
 class DatabaseManager:
     """
     Manages database operations including connection setup, encryption, and various CRUD operations.
@@ -168,15 +215,19 @@ class DatabaseManager:
         Initializes the DatabaseManager with the specified database dialect, URL, and encryption key.
 
         Args:
-            db_dialect (str): The database dialect (e.g., 'sqlite').
-            db_url (str): The database URL.
+            db_dialect (str): The database dialect (e.g., 'sqlite', 'postgresql+psycopg2').
+            db_url (str): The database URL or URL suffix.
             encryption_key (str): The encryption key used for data encryption.
         """
-        self.conn_url = f'{db_dialect}:{db_url}'
+        self.conn_url = _make_connection_url(db_dialect, db_url)
+        logger.info(f"Initializing database connection with URL pattern: {self.conn_url.split('@')[0]}@..." if '@' in self.conn_url else f"Initializing database connection: {self.conn_url}")
         self.engine = create_engine(self.conn_url, pool_size=10)
         # TODO: Remove db_file = self.conn_url.split("///")[1]
         # TODO use self.engine
-        self.db_file = self.conn_url.split("///")[1]  # sqlite:////
+        if ":///" in self.conn_url:
+            self.db_file = self.conn_url.split("///")[1]  # sqlite:////
+        else:
+            self.db_file = None  # Not applicable for non-SQLite databases
         self.cipher_suite = Fernet(base64.urlsafe_b64encode(encryption_key.encode()))
     # def get_db(self):
     #     database = self.session_local()

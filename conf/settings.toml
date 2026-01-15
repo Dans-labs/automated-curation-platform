@@ -3,8 +3,21 @@ log_file = "@format {env[BASE_DIR]}/logs/acp.log"
 log_format = "%(asctime)s %(levelname)s %(name)s %(threadName)s : %(message)s"
 log_level = 10
 otlp_enable = false
+
+# Database configuration
+# For SQLite (default):
 db_dialect="sqlite"
 db_url = "@format ///{env[BASE_DIR]}/data/db/acp.db"
+
+# For PostgreSQL (uncomment and configure as needed):
+# Option 1: Separate dialect and URL parts
+# db_dialect="postgresql+psycopg2"
+# db_url = "//username:password@localhost:5432/acp"
+#
+# Option 2: Full connection URL (db_dialect will be ignored)
+# db_dialect=""
+# db_url = "postgresql+psycopg2://username:password@localhost:5432/acp"
+
 data_db_file = "sqlite:{@format {env[BASE_DIR]}/data/db/acp.db}"
 data_tmp_base_dir = "@format {env[BASE_DIR]}/data/tmp"
 data_tmp_base_tus_files_dir = "@format {env[BASE_DIR]}/data/tmp/tus-files"
