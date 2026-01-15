@@ -174,19 +174,19 @@ def _make_connection_url(db_dialect: str, db_url: str) -> str:
     """
     # If db_url already contains the scheme (dialect://...), return it as-is
     if "://" in db_url:
-        logger.info(f"Using full connection URL from db_url (dialect will be ignored)")
+        logger.debug("Using full connection URL from db_url (dialect will be ignored)")
         return db_url
     
     # If dialect is empty, assume db_url is a complete URL
     if not db_dialect:
-        logger.info(f"No dialect specified, using db_url as complete connection URL")
+        logger.debug("No dialect specified, using db_url as complete connection URL")
         return db_url
     
     # For SQLite, the format is sqlite:///path (triple slash for absolute path)
     # db_url should be like "///path/to/db" or "///{env}/path/to/db"
     if db_dialect.startswith("sqlite"):
         conn_url = f"{db_dialect}:{db_url}"
-        logger.info(f"Composed SQLite connection URL (dialect: {db_dialect})")
+        logger.debug(f"Composed SQLite connection URL (dialect: {db_dialect})")
         return conn_url
     
     # For other databases (PostgreSQL, MySQL, etc.), format is dialect://user:pass@host:port/dbname
@@ -194,10 +194,13 @@ def _make_connection_url(db_dialect: str, db_url: str) -> str:
     if db_url.startswith("//"):
         conn_url = f"{db_dialect}:{db_url}"
     else:
-        # If db_url doesn't start with //, add it
-        conn_url = f"{db_dialect}://{db_url.lstrip('/')}"
+        # If db_url doesn't start with //, ensure proper :// separator
+        # Remove leading slash if present (but keep // intact for network paths)
+        if db_url.startswith("/") and not db_url.startswith("//"):
+            db_url = db_url[1:]
+        conn_url = f"{db_dialect}://{db_url}"
     
-    logger.info(f"Composed connection URL (dialect: {db_dialect})")
+    logger.debug(f"Composed connection URL (dialect: {db_dialect})")
     return conn_url
 
 
@@ -220,12 +223,22 @@ class DatabaseManager:
             encryption_key (str): The encryption key used for data encryption.
         """
         self.conn_url = _make_connection_url(db_dialect, db_url)
-        logger.info(f"Initializing database connection with URL pattern: {self.conn_url.split('@')[0]}@..." if '@' in self.conn_url else f"Initializing database connection: {self.conn_url}")
+        
+        # Log connection info, masking credentials for security
+        if '@' in self.conn_url:
+            # Mask credentials in URLs like: postgresql://user:pass@host/db
+            masked_url = self.conn_url.split('@')[0].rsplit(':', 1)[0] + ':***@' + self.conn_url.split('@')[1]
+            logger.info(f"Initializing database connection: {masked_url}")
+        else:
+            logger.info(f"Initializing database connection: {self.conn_url}")
+            
         self.engine = create_engine(self.conn_url, pool_size=10)
+        
         # TODO: Remove db_file = self.conn_url.split("///")[1]
         # TODO use self.engine
+        # db_file is only applicable for SQLite (format: sqlite:///path/to/db)
         if ":///" in self.conn_url:
-            self.db_file = self.conn_url.split("///")[1]  # sqlite:////
+            self.db_file = self.conn_url.split("///")[1]
         else:
             self.db_file = None  # Not applicable for non-SQLite databases
         self.cipher_suite = Fernet(base64.urlsafe_b64encode(encryption_key.encode()))
