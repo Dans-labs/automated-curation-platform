@@ -1,7 +1,7 @@
 import os
 import shutil
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from fastapi_tusd import TusRouter
 
@@ -9,10 +9,10 @@ from src.acp.commons import app_settings
 
 if not os.path.exists(app_settings.DATA_TMP_BASE_TUS_FILES_DIR):
     os.makedirs(app_settings.DATA_TMP_BASE_TUS_FILES_DIR)
+
 upload_files = TusRouter(store_dir=app_settings.DATA_TMP_BASE_TUS_FILES_DIR, location=f'{app_settings.TUS_BASE_URL}/files', tags=["Files"])
 router = APIRouter()
-
-router.include_router(upload_files, prefix="/files")
+router.include_router(upload_files, prefix="/files", )
 
 
 @router.get("/upload.html", tags=["Files-Utils"])

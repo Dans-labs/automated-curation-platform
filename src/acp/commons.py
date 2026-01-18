@@ -1,6 +1,7 @@
 import ast
 import importlib
 import inspect
+import json
 import logging
 import os
 import re
@@ -24,8 +25,9 @@ from jsoncomparison import Compare
 from requests_toolbelt.multipart.encoder import MultipartEncoder, MultipartEncoderMonitor
 from starlette import status
 
-from src.acp.dbz import DatabaseManager, DepositStatus
-from src.acp.models.assistant_datamodel import ProcessedMetadata
+from src.acp.db.dbz import DatabaseManager, DepositStatus, StateVersion, DatasetStatus
+from src.acp.models.app_model import Asset, TargetApp
+from src.acp.models.assistant_datamodel import ProcessedMetadata, RepoAssistantDataModel
 from src.acp.models.bridge_output_model import TargetDataModel, TargetResponse
 
 base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -37,7 +39,15 @@ data = {}
 
 project_details = a_commons.get_project_details(os.getenv("BASE_DIR"), ['name', 'version', 'description', 'title'])
 
-db_manager = DatabaseManager(db_dialect=app_settings.DB_DIALECT, db_url=app_settings.DB_URL, encryption_key=app_settings.DB_ENCRYPTION_KEY)
+db_dialect = os.getenv("DB_DIALECT", app_settings.DB_DIALECT)
+db_url = os.getenv("DB_URL", app_settings.DB_URL)
+encryption_key = os.getenv("DB_ENCRYPTION_KEY", app_settings.DB_ENCRYPTION_KEY)
+
+def get_db_manager(app_name: str):
+    return DatabaseManager(db_dialect=db_dialect,
+                           db_url=db_url,
+                           encryption_key=encryption_key,
+                           app_name= app_name)
 
 transformer_headers = {
     'Content-Type': 'application/json',
@@ -54,63 +64,15 @@ assistant_repo_headers = {
     'Authorization': f'Bearer {app_settings.ACP_CONFIG_ASSISTANT_SERVICE_API_KEY}'
 }
 
-def get_version():
-    """
-    Retrieves the version of the package from the `pyproject.toml` file.
-
-    This function opens the `pyproject.toml` file located in the base directory of the project,
-    reads its contents, and returns the version of the package as specified under the `[tool.poetry]` section.
-
-    Returns:
-    str: The version of the package.
-    """
+def get_version() -> str:
+    """Retrieve the version of the package."""
     return project_details['version']
 
 
-def get_name():
+def get_name() -> str:
+    """Retrieve the name of the package."""
     return project_details['name']
 
-# def setup_logger():
-#     """
-#     This function sets up the logger for the application.
-#
-#     It iterates over the list of loggers specified in the app_settings, and for each logger, it:
-#     - Gets or creates a logger with the specified name.
-#     - Creates a formatter with the specified format.
-#     - Creates a file handler that writes to the specified log file in append mode, and sets its formatter.
-#     - Creates a stream handler (which writes to stdout by default) and sets its formatter.
-#     - Creates a timed rotating file handler that rotates the log file every 8 hours and keeps the last 10 log files, and adds it to the logger.
-#     - Sets the log level of the logger.
-#     - Adds the file handler and the stream handler to the logger.
-#     - Logs a startup message at the debug level, which includes the current time and the Python version.
-#
-#     The logger app_settings (name, format, log file, and log level) are read from the `LOGGERS` setting in the application's configuration.
-#
-#     The startup message is logged using the `logger` function defined elsewhere in this plugin.
-#     """
-#     now = datetime.utcnow()
-#     for log in app_settings.LOGGERS:
-#         log_setup = logging.getLogger(log.get('name'))
-#         formatter = logging.Formatter(log.get('log_format'))
-#         file_handler = logging.FileHandler(log.get('log_file'), mode='a')
-#         file_handler.setFormatter(formatter)
-#         stream_handler = logging.StreamHandler()
-#         stream_handler.setFormatter(formatter)
-#         rotating_handler = TimedRotatingFileHandler(log.get('log_file'), when="H", interval=8, backupCount=10)
-#         log_setup.addHandler(rotating_handler)
-#         log_setup.setLevel(log.get('log_level'))
-#         log_setup.addHandler(file_handler)
-#         log_setup.addHandler(stream_handler)
-#         logger(f"Start {log.get('name')} at {now} Pyton version: {platform.python_version()}",
-#                'debug', log.get('name'))
-
-
-# def logger(msg, level, logfile):
-#     log = logging.getLogger(logfile)
-#     if level == 'info': log.info(msg)
-#     if level == 'warning': log.warning(msg)
-#     if level == 'error': log.error(msg)
-#     if level == 'debug': log.debug(msg)
 
 
 def get_class(kls) -> Any:
@@ -211,55 +173,6 @@ def transform_xml(transformer_url: str, str_tobe_transformed: str) -> str:
     str: The transformed string if the request is successful.
     """
     return transform(transformer_url, str_tobe_transformed, transformer_headers_xml)
-
-# def transform(transformer_url: str, input: str) -> str:
-#     logger(transformer_url: {transformer_url}', LOGGER_LEVEL_DEBUG, LOG_NAME_PS)
-#     logger(f'input: {input}', LOGGER_LEVEL_DEBUG, LOG_NAME_PS)
-#     try:
-#         transformer_response = requests.post(transformer_url, headers=transformer_headers, data=input)
-#         if transformer_response.status_code == 200:
-#             transformed_metadata = transformer_response.json()
-#             str_transformed_metadata = transformed_metadata.get('result')
-#             logger(f'Transformer result: {str_transformed_metadata}', LOGGER_LEVEL_DEBUG, LOG_NAME_PS)
-#             return str_transformed_metadata
-#         logger(transformer_response.status_code: {transformer_response.status_code}', 'error', LOG_NAME_PS)
-#         raise ValueError(f"Error - Transformer response status code: {transformer_response.status_code}")
-#     except ConnectionError as ce:
-#         logger(f'Errors during transformer: {ce.with_traceback(ce.__traceback__)}', LOGGER_LEVEL_DEBUG, LOG_NAME_PS)
-#         raise ValueError(f"Error - {ce.with_traceback(ce.__traceback__)}")
-#     except Exception as ex:
-#         raise ValueError(f"Error - {ex.with_traceback(ex.__traceback__)}")
-
-
-# def handle_deposit_exceptions(bridge_output_model: BridgeOutputModel) -> Callable[
-#     [Any], Callable[[tuple[Any, ...], dict[str, Any]], BridgeOutputModel | Any]]:
-#     def decorator(func):
-#         @wraps(func)
-#         def wrapper(*args, **kwargs):
-#             try:
-#                 print("start")
-#                 print(f'kwargs: {kwargs}')
-#                 print(f'args: {args}')
-#                 # Call the original function
-#                 rv = func(*args, **kwargs)
-#                 print("end")
-#                 return rv
-#             except Exception as ex:
-#                 # Handle the exception and provide the default response
-#                 logger(f'Errors in {func.__name__}: {ex.with_traceback(ex.__traceback__)}',
-#                        LOGGER_LEVEL_DEBUG, LOG_NAME_PS)
-#                 bridge_output_model.deposit_status = DepositStatus.ERROR
-#                 target_response = TargetResponse()
-#                 target_response.duration=10100
-#                 target_response.error="hello error"
-#                 bridge_output_model.message = "this is bridge message"
-#                 target_response.message = "TARGET MESSAGE"
-#                 bridge_output_model.response = target_response
-#                 return bridge_output_model
-#
-#         return wrapper
-#
-#     return decorator
 
 
 
@@ -377,59 +290,50 @@ def inspect_bridge_plugin(py_file_path: str):
     return results
 
 
-# class ACPeException(Exception):
-#     def __init__(self, bom: BridgeOutputDataModel, message: str):
-#         self.bom = bom
-#         self.message = message
-#         super().__init__(self.message)
 
 def send_mail(subject: str, text: str, recipients: list[str] = None):
     """
-    Send an email with the specified subject and text.
-
-    This function sends an email using the SMTP protocol. The email is sent from the sender's email address
-    to the recipient's email address, with the specified subject and text. The email app_settings (sender email,
-    app password, recipient email, and mail subject prefix) are read from the application's configuration.
+    Send an email with the specified subject and text using SMTP.
 
     Args:
         subject (str): The subject of the email.
         text (str): The text content of the email.
+        recipients (list[str], optional): List of recipient email addresses. Defaults to app_settings.MAIL_TO.
 
     Raises:
-        Exception: If there is an error sending the email.
+        ValueError: If there is an error sending the email.
     """
     sender_email = app_settings.MAIL_USR
     app_password = app_settings.MAIL_PASS
-    if not recipients:
-        recipients = app_settings.MAIL_TO
+    recipients = recipients or list(app_settings.MAIL_TO)
 
     message = MIMEMultipart()
     message['From'] = sender_email
     message['Subject'] = f'{app_settings.get("MAIL_SUBJECT_PREFIX", "mail_subject_prefix not set")}: {subject}'
     message.attach(MIMEText(text, 'plain'))
 
-    if app_settings.get('send_mail', True):
-        try:
-            with smtplib.SMTP(app_settings.SMTP_SERVER, app_settings.SMTP_PORT) as server:
-                if app_settings.get('use_tls', True):
-                    server.starttls()
-                    server.login(sender_email, app_password)
-                for recipient_email in recipients:
-                    message['To'] = recipient_email
-                    server.sendmail(sender_email, recipient_email, message.as_string())
-                    logging.debug(f"Email sent successfully to {recipient_email}")
-            logging.debug(f"Email sent successfully to {recipient_email}")
-        except Exception as e:
-            print(f"Error: {e}")
-            logging.error(f"Unsuccessful sent email to {recipient_email}")
-            raise ValueError(f"Error: {e}")
-    else:
+    if not app_settings.get('send_mail', True):
         logging.info("Sending email is disabled.")
+        return
 
+    try:
+        with smtplib.SMTP(app_settings.SMTP_SERVER, app_settings.SMTP_PORT) as server:
+            if app_settings.get('use_tls', True):
+                server.starttls()
+                server.login(sender_email, app_password)
+            for recipient in recipients:
+                message['To'] = recipient
+                server.sendmail(sender_email, recipient, message.as_string())
+                logging.debug(f"Email sent successfully to {recipient}")
+        logging.debug(f"Email sent successfully to all recipients: {recipients}")
+    except Exception as e:
+        logging.error(f"Failed to send email to {recipients}: {e}")
+        raise ValueError(f"Error: {e}")
 
 def dmz_dataverse_headers(username, password) -> dict:
-    headers = {'X-Authorization': app_settings.dmz_x_authorization_value} if app_settings.exists("dmz_x_authorization_value",
-                                                                                         fresh=False) else {}
+    headers = {}
+    if app_settings.exists("dmz_x_authorization_value", fresh=False):
+        headers['X-Authorization'] = app_settings.dmz_x_authorization_value
     if username == 'API_KEY':
         headers["X-Dataverse-key"] = password
     return headers
@@ -547,7 +451,7 @@ def zip_with_progress(file_path, zip_path):
     logging.info(f"Zipping of '{file_path}' completed.")
 
 
-def delete_symlink_and_target(link_name):
+def delete_symlink_and_target(link_name) -> str|None:
     """
     Deletes a symbolic link and its target.
 
@@ -561,6 +465,7 @@ def delete_symlink_and_target(link_name):
     Returns:
     None
     """
+
     if os.path.islink(link_name):
         target = os.readlink(link_name)
         if os.path.isdir(target):
@@ -568,7 +473,15 @@ def delete_symlink_and_target(link_name):
         else:
             os.remove(target)
         os.remove(link_name)
-        logging.info(f'{link_name} and its target {target} DELETED successfully.')
+        logging.info(f"Deleted symlink '{link_name}' and its target '{target}'.")
+        return target
+
+    if os.path.isdir(link_name):
+        shutil.rmtree(link_name)
+    else:
+        os.remove(link_name)
+    logging.warning(f"'{link_name}' is not a symlink but has been deleted.")
+    return None
 
 def compress_zip_file(original_zip_path):
     """
@@ -667,40 +580,34 @@ def create_s3_client():
     )
 
 
-async def fetch_dv_json(rsp, target, target_creds, url):
+async def compare_dv_json(deposited_metadata, target_repo_name, target_creds, api_url):
     """
     Fetch JSON data from a Dataverse API and compare it with the original deposited metadata
     so that we can see whether any changes have been made to the dataset after deposit from the ACP.
 
     Args:
-        rsp (dict): The response dictionary containing deposited metadata.
-        target (TargetApp): The target application instance.
+        deposited_metadata (dict): The response dictionary containing deposited metadata.
+        target_repo_name (TargetApp): The target application instance.
         target_creds (list): A list of credentials for target repositories.
-        url (str): The URL to fetch the JSON data from.
+        api_url (str): The URL to fetch the JSON data from.
 
     Returns:
         dict: The differences between the deposited metadata and the fetched JSON data.
               If no differences are found, returns an empty dictionary.
     """
     # Modify the URL to point to the correct API endpoint
-    url = url.replace("dataset.xhtml", "api/datasets/:persistentId/")
 
     # Iterate over the target credentials to find the matching repository
     for tc in target_creds:
-        if tc["target-repo-name"] == target.repo_name:
+        if tc["target-repo-name"] == target_repo_name:
             api_token = tc["credentials"]["password"]
             headers = dmz_dataverse_headers("API_KEY", api_token)
-            response = requests.get(url, headers=headers)
+            dv_response = requests.get(api_url, headers=headers)
 
-            if response.status_code == 200:
-                deposited_metadata = rsp.get("deposited_metadata")
-                if deposited_metadata:
-                    return Compare().check(deposited_metadata, response.json())
-                else:
-                    logging.info("No deposited metadata found to compare.")
-                    return {}
+            if dv_response.status_code == 200:
+                return Compare().check(deposited_metadata, dv_response.json())
             else:
-                logging.error(f'Error occurs: status code: {response.status_code} from {url}')
+                logging.error(f'Error occurs: status code: {dv_response.status_code} from {api_url}')
 
             break
 
@@ -731,3 +638,112 @@ def processed_metadata_handler(steps, rec):
 
     return rec
 
+
+def fetch_from_assistant_config(endpoint: str) -> str:
+    """
+    Fetch data from the assistant configuration URL.
+
+    Args:
+        endpoint (str): The endpoint to append to the base assistant configuration URL.
+
+    Returns:
+        str: The JSON response from the specified endpoint.
+
+    Raises:
+        HTTPException: If the request fails with a non-200 status code.
+    """
+    repo_url = f'{app_settings.ASSISTANT_CONFIG_URL}/{endpoint}'
+    logging.info(f'Fetching data from {repo_url}')
+    response = requests.get(repo_url, headers=assistant_repo_headers)
+    if response.status_code != 200:
+        logging.error(f'Failed to fetch data: {repo_url}, status code: {response.status_code}')
+        raise HTTPException(status_code=404, detail=f"{repo_url} not found")
+    return response.json()
+
+@handle_ps_exceptions
+def retrieve_targets_configuration(assistant_config_name: str) -> str:
+    """
+    Retrieve the configuration for the specified assistant.
+
+    Args:
+        assistant_config_name (str): The name of the assistant configuration to retrieve.
+
+    Returns:
+        str: The JSON response containing the assistant configuration.
+    """
+    return fetch_from_assistant_config(f'name/{assistant_config_name}')
+
+@handle_ps_exceptions
+def retrieve_apps_list() -> str:
+    """
+    Retrieve the list of apps from the assistant configuration URL.
+
+    Returns:
+        str: The JSON response containing the list of apps.
+    """
+    return fetch_from_assistant_config('list-apps')
+
+#TODO: Refactor this function, retrieve repo_config_name instead of only app_mae
+async def get_repo_assistant(req):
+    assistant_name = req.headers.get('assistant-config-name')
+    if not assistant_name:
+        raise HTTPException(status_code=400, detail="assistant-config-name")
+
+    repo_config = retrieve_targets_configuration(assistant_name)
+    return RepoAssistantDataModel.model_validate_json(repo_config)
+
+
+async def create_asset(dataset, db_manager, target_creds):
+    asset = Asset()
+    asset.dataset_id = dataset.id
+    asset.title = dataset.title
+    asset.created_at = dataset.created_at.strftime('%Y-%m-%d %H:%M:%S')
+    asset.saved_at = dataset.saved_at.strftime('%Y-%m-%d %H:%M:%S')
+    asset.submitted_at = dataset.submitted_at.strftime('%Y-%m-%d %H:%M:%S') if dataset.submitted_at else ''
+    asset.status = DatasetStatus.RESUBMIT if dataset.status == DatasetStatus.DRAFT_RESUBMIT else dataset.status
+    asset.acp_version = dataset.acp_version
+
+    # Find target repositories by dataset ID
+    target_repo_recs = db_manager.find_target_repos_by_dataset_id(dataset_id=dataset.id, status_not_in=[StateVersion.DRAFT])
+    # Process target repositories if the dataset is not in DRAFT release version
+    for target_repo_rec in target_repo_recs:
+        target_app = TargetApp()
+        target_app.repo_name = target_repo_rec.name
+        target_app.display_name = target_repo_rec.display_name
+        target_app.deposit_status = target_repo_rec.deposit_status.name.lower()
+        target_app.deposited_at = target_repo_rec.deposited_at.strftime(
+            '%Y-%m-%d %H:%M:%S') if target_repo_rec.deposited_at else ''
+        target_app.deposit_duration = str(target_repo_rec.deposit_duration)
+
+        # Parse the target repository output as JSON if available
+        target_service_response_json = json.loads(target_repo_rec.target_service_response) if target_repo_rec.target_service_response else {}
+        target_service_response_deposited_metadata = target_service_response_json.get('deposited_metadata')
+        target_repo_identifiers = target_repo_rec.external_identifiers
+        if target_repo_identifiers:
+            target_app.external_identifiers = target_repo_identifiers
+            api_url = target_app.external_identifiers[0].get("api-url") if target_app.external_identifiers else None
+            target_app.diff = await compare_dv_json(
+                target_service_response_deposited_metadata,
+                target_repo_rec.name,
+                target_creds,
+                api_url
+            ) if api_url else {}
+        else:
+            target_app.output_response = {}
+
+        asset.targets.append(target_app)
+    return asset
+
+def validate_json(str_dv_metadata):
+    try:
+        json.loads(str_dv_metadata)
+    except json.JSONDecodeError as e:
+        logging.error(f"JSON decode error: {e}")
+        # Remove invalid control characters and retry
+        str_dv_metadata = re.sub(r'[\x00-\x1F\x7F]', '', str_dv_metadata)
+        try:
+            json.loads(str_dv_metadata)
+        except json.JSONDecodeError as e:
+            logging.error(f"Retry failed: {e}")
+            return None
+    return str_dv_metadata

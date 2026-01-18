@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Union
 
 from pydantic import BaseModel, Field
 
@@ -40,13 +40,14 @@ class InboxDatasetDataModel:
         metadata (dict): The metadata associated with the dataset.
         release_version (str): The release version of the dataset.
     """
+    id : str = ""
     assistant_name: str
     target_creds: str
     owner_id: str
     title: str = ''
-    metadata: dict
+    metadata_content: dict
     metadata_type: str = ''
-    release_version: str
+    status: str
 
 
 class TargetApp(BaseModel):
@@ -63,16 +64,17 @@ class TargetApp(BaseModel):
         repo_name (str): The name of the repository, aliased as 'repo-name'.
         display_name (str): The display name of the target application, aliased as 'display-name'.
         deposit_status (str): The deposit status of the target application, aliased as 'deposit-status'.
-        deposit_time (str): The deposit time of the target application, aliased as 'deposit-time'.
+        deposited_at (str): The deposit time of the target application, aliased as 'deposit-time'.
         duration (str): The duration of the process.
         output_response (Dict[str, Any]): The output response from the target application, aliased as 'output-response'.
     """
     repo_name: str = Field(None, alias='repo-name')
     display_name: str = Field(None, alias='display-name')
     deposit_status: str = Field(None, alias='deposit-status')
-    deposit_time: datetime|str = Field(None, alias='deposit-time')
-    duration: float|str = ''
+    deposited_at: datetime | str = Field(None, alias='deposit-time')
+    deposit_duration: float|str = ''
     output_response: dict = Field(None, alias='output-response')
+    external_identifiers: Union[str,List[dict]] = Field(None, alias='deposited-identifiers')
     diff: dict = {}
 
 
@@ -87,22 +89,23 @@ class Asset(BaseModel):
     Attributes:
         dataset_id (str): The ID of the dataset, aliased as 'dataset-id'.
         title (str): The title of the asset.
-        md (str): The metadata of the asset.
-        created_date (str): The creation date of the asset, aliased as 'created-date'.
-        saved_date (str): The saved date of the asset, aliased as 'saved-date'.
-        submitted_date (str): The submitted date of the asset, aliased as 'submitted-date'.
-        release_version (str): The release version of the asset, aliased as 'release-version'.
+        metadata_content (str): The metadata of the asset.
+        created_at (str): The creation date of the asset, aliased as 'created-date'.
+        saved_at (str): The saved date of the asset, aliased as 'saved-date'.
+        submitted_at (str): The submitted date of the asset, aliased as 'submitted-date'.
+        status (str): The release version of the asset, aliased as 'release-version'.
         version (str): The version of the asset.
         targets (List[TargetApp]): The list of target applications associated with the asset.
     """
     dataset_id: str = Field(None, alias='dataset-id')
     title: str = ''
-    md: dict|str = ''
-    created_date: datetime|str = Field(None, alias='created-date')
-    saved_date: datetime|str = Field(None, alias='saved-date')
-    submitted_date: datetime|str = Field(None, alias='submitted-date')
-    release_version: str = Field(None, alias='release-version')
-    version: str = ''
+    md: dict | str = ''
+    created_at: datetime | str = Field(None, alias='created-at')
+    saved_at: datetime | str = Field(None, alias='saved-at')
+    submitted_at: datetime | str = Field(None, alias='submitted-at')
+    deposited_version: str = Field(None, alias='deposited-version')
+    status: str = Field(None, alias='status')
+    acp_version: str = Field(None, alias='acp-version')
     targets: List[TargetApp] = []
 
 

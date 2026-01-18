@@ -17,11 +17,13 @@ ENV BASE_DIR=/home/akmi/acp
 
 WORKDIR ${BASE_DIR}
 
-
-# Install uv.
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
-
-# Copy the application into the container.
+# Accept build-time BUILD_DATE and persist as runtime env
+ARG BUILD_DATE=unknown
+ENV BUILD_DATE=${BUILD_DATE}
+# Install uv CLI from PyPI instead of copying from a remote ghcr image which may be unreachable
+# Installing via pip places the `uv` console script into /usr/local/bin so it will be on PATH
+RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    python -m pip install --no-cache-dir uv
 
 
 # Create and activate virtual environment

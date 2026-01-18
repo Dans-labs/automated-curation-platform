@@ -14,7 +14,7 @@ dataverse_response_timeout = 1200
     client_id="ohsmart-auth"
 
 [default.keycloak_ohsmart_dev]
-    url="http://localhost:9090"
+    url="https://keycloak.dansdemo.nl"
     realms="ohsmart"
     client_id="ohsmart-auth"
 
