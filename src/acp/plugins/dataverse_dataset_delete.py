@@ -6,7 +6,7 @@ from datetime import datetime
 import requests
 
 from src.acp.bridge import Bridge
-from src.acp.dbz import DepositStatus
+from src.acp.db.dbz import DepositStatus
 from src.acp.models.bridge_output_model import TargetDataModel, TargetResponse, ResponseContentType
 
 
@@ -28,7 +28,7 @@ class DataverseDatasetDelete(Bridge):
         Returns:
         BridgeOutputDataModel: The output model containing the response from the Dataverse repository and the status of the deletion process.
         """
-        md_json = json.loads(self.metadata_rec.md)
+        md_json = json.loads(self.dataset_rec.metadata_content)
         try:
             dv_pid = md_json["datasetVersion"]["datasetPersistentId"]
         except KeyError:

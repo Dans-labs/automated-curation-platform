@@ -5,7 +5,7 @@ import urllib
 
 from src.acp.bridge import Bridge
 from src.acp.commons import send_mail
-from src.acp.dbz import DepositStatus
+from src.acp.db.dbz import DepositStatus
 from src.acp.models.bridge_output_model import TargetDataModel
 
 
@@ -35,7 +35,7 @@ class Mail(Bridge):
 
         tdm = TargetDataModel()
         try:
-            send_mail(self.metadata_rec.title, self.metadata_rec.md, [parsed_url.path])
+            send_mail(self.dataset_rec.title, self.dataset_rec.metadata_content)
             tdm.deposit_status = DepositStatus.SUCCESS
         except ValueError as e:
             logging.error(f'Failed to send email: {e}')

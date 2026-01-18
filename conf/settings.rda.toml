@@ -12,4 +12,9 @@ loggers = [{"name"="rda", "log_file"="@format {env[BASE_DIR]}/logs/rda.log", "lo
     realms="rda"
     client_id="rda-auth"
 
+[default.keycloak_rda_prod]
+    url="https://keycloak.dansdemo.nl"
+    realms="rda"
+    client_id="rda-auth"
+
 

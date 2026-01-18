@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import StrEnum, auto
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from pydantic import BaseModel, Field
 
-from src.acp.dbz import DepositStatus
+from src.acp.db.dbz import DepositStatus
 
 
 class ResponseContentType(StrEnum):
@@ -56,9 +56,18 @@ class IdentifierItem(BaseModel):
         protocol (IdentifierProtocol): The protocol of the identifier.
         url (Optional[str]): The URL associated with the identifier.
     """
+
     value: str = None
     protocol: IdentifierProtocol = IdentifierProtocol.DOI
     url: Optional[str] = None
+    api_url: Optional[str] = None
+    def to_dict(self):
+        return {
+            "value": self.value,
+            "protocol": self.protocol.value,
+            "url": self.url,
+            "api-url": self.api_url
+        }
 
 
 class TargetResponse(BaseModel):
@@ -100,6 +109,8 @@ class TargetDataModel(BaseModel):
     deposit_status: Optional[DepositStatus] = Field(None, alias='deposit-status')
     payload: Optional[dict|str] = Field(None, alias='payload')
     deposited_metadata: Optional[dict|str] = Field(None, alias='deposited-metadata')  #
+    external_identifiers: Optional[Union[str,List[IdentifierItem]]] = Field(None, alias='deposited-identifiers')
+    deposited_version: Optional[str] = Field(default="", alias='deposited-version')
     response: TargetResponse = Field(default_factory=TargetResponse)
 
 

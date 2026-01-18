@@ -9,7 +9,7 @@ import requests
 
 from src.acp.bridge import Bridge
 from src.acp.commons import app_settings
-from src.acp.dbz import DepositStatus
+from src.acp.db.dbz import DepositStatus
 from src.acp.models.bridge_output_model import TargetDataModel, TargetResponse, ResponseContentType, IdentifierItem, \
     IdentifierProtocol
 
@@ -35,8 +35,8 @@ class SwhApiDepositor(Bridge):
         """
         logging.info(f'DEPOSIT to {self.target.repo_name}')
         target_response = TargetResponse()
-        target_swh = jmespath.search("metadata.repository_url.value",#TODO: Move to acp config assistant as a json element
-                                     json.loads(self.metadata_rec.md))
+        target_swh = jmespath.search("metadata.repository_url.value",  #TODO: Move to acp config assistant as a json element
+                                     json.loads(self.dataset_rec.metadata_content))
         tdm = TargetDataModel(response=target_response)
         headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {app_settings.SWH_ACCESS_TOKEN}'}
         logging.info(f'self.target.target_url: {self.target.target_url}')
@@ -50,6 +50,7 @@ class SwhApiDepositor(Bridge):
             goto_sleep = False
             counter = 0  # TODO: Refactor using Tenancy!
             while True and (counter < app_settings.SWH_API_MAX_RETRIES):
+                logging.info(f'SWH counter: {counter}')
                 counter += 1
                 swh_check_url = api_resp_json.get("request_url")
                 step1_check_resp = requests.get(swh_check_url, headers=headers)
@@ -109,6 +110,7 @@ class SwhApiDepositor(Bridge):
                         ideni = IdentifierItem(value=swhid_dir, url=swhid_dir_url,
                                                protocol=IdentifierProtocol('swhid'))
                         identifier_items.append(ideni)
+                        tdm.external_identifiers = identifier_items
                         break
                     else:
                         goto_sleep = True
@@ -120,7 +122,7 @@ class SwhApiDepositor(Bridge):
             logging.error(f'ERROR api_resp.status_code: {api_resp.status_code}')
             target_response.status_code = api_resp.status_code
             tdm.deposit_status = DepositStatus.ERROR
-            target_response.error = json.dumps(api_resp.json())
+            target_response.error = str(api_resp.content)
             target_response.content_type = ResponseContentType.JSON
             target_response.url = swh_url
             target_response.content = json.dumps(api_resp.json())

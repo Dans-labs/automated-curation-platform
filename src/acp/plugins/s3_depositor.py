@@ -27,7 +27,7 @@ class S3Depositor(Bridge):
         BridgeOutputDataModel: The output model for the S3 deposit process.
         """
         logging.info(f'Depositing to S3: {self.target.repo_name}')
-        metadata = json.loads(self.metadata_rec.md)
+        metadata = json.loads(self.dataset_rec.metadata_content)
 
         s3_client = create_s3_client()
         s3_client.put_object(Bucket=app_settings.S3_BUCKET_NAME, Key=f'{app_settings.S3_Key}', Body=json.dumps(metadata))

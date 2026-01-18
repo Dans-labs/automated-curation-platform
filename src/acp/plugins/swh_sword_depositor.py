@@ -10,7 +10,7 @@ import sword2.deposit_receipt as dr
 from requests.auth import HTTPBasicAuth
 
 from src.acp.bridge import Bridge
-from src.acp.commons import app_settings, DepositStatus, transform, db_manager
+from src.acp.commons import app_settings, DepositStatus, transform
 from src.acp.models.bridge_output_model import TargetDataModel, TargetResponse
 
 
@@ -33,16 +33,16 @@ class SwhSwordDepositor(Bridge):
         Returns:
         BridgeOutputDataModel: The output model containing the response from the SWH API and the status of the deposit.
         """
-        bridge_output_model = TargetDataModel()
+        output_model = TargetDataModel()
         # Create SWORD payload
-        swh_form_md = json.loads(self.metadata_rec.md)
-        dv_target = db_manager.find_target_repo(self.dataset_id, self.target.input.from_target_name)
+        swh_form_metadata_content = json.loads(self.dataset_rec.metadata_content)
+        dv_target = self.db_manager.find_target_repo(self.dataset_id, self.target.input.from_target_name)
         if dv_target:
-            swh_form_md.update({"doi": json.loads(dv_target.target_output)['response']['identifiers'][0]['value']})
-        logging.info(f"SwhSwordDepositor- swh_form_md - after update (doi): {json.dumps(swh_form_md)}")
+            swh_form_metadata_content.update({"doi": json.loads(dv_target.target_service_response)['response']['identifiers'][0]['value']})
+        logging.info(f"SwhSwordDepositor- swh_form_metadata_content - after update (doi): {json.dumps(swh_form_metadata_content)}")
         str_sword_payload = transform(
             transformer_url=self.target.metadata.transformed_metadata[0].transformer_url,
-            str_tobe_transformed=json.dumps(swh_form_md)
+            str_tobe_transformed=json.dumps(swh_form_metadata_content)
         )
         logging.info(f'deposit to "{self.target.target_url}"')
         logging.info(f'payload: "{str_sword_payload}"')
@@ -58,7 +58,15 @@ class SwhSwordDepositor(Bridge):
 
             deposit_response = dr.Deposit_Receipt(xml_deposit_receipt=rt)
             if deposit_response.metadata['atom_deposit_status'][0] == 'deposited':
-                return TargetDataModel(deposit_status=DepositStatus.DEPOSITED, deposited_metadata=rt)
+                target_repo = TargetResponse()
+                target_repo.url = self.target.target_url
+                target_repo.status_code = response.status_code
+                target_repo.content = response.text
+                output_model.deposit_status = DepositStatus.DEPOSITED
+                output_model.response = target_repo
+                output_model.deposited_metadata = rt
+                output_model.deposit_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")
+                return output_model
             status_url = deposit_response.alternate
             logging.info(f'Status request send to {status_url}')
             counter = 0
@@ -81,15 +89,15 @@ class SwhSwordDepositor(Bridge):
                         target_repo.url = status_url
                         target_repo.status_code = rsp.status_code
                         target_repo.content = rsp_text
-                        bridge_output_model.deposit_status = DepositStatus.FINISH
-                        bridge_output_model.response = target_repo
-                        bridge_output_model.deposit_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")
-                        return bridge_output_model
+                        output_model.deposit_status = DepositStatus.FINISH
+                        output_model.response = target_repo
+                        output_model.deposit_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")
+                        return output_model
 
                 else:
                     raise ValueError(f'Error request to {status_url} with rsp.status_code: {rsp.status_code} and '
                                      f'rsp.text: {rsp.text}')
         else:
-            bridge_output_model.deposit_status = DepositStatus.ERROR
-            bridge_output_model.deposited_metadata = response.text
-        return bridge_output_model
+            output_model.deposit_status = DepositStatus.ERROR
+            output_model.deposited_metadata = response.text
+        return output_model

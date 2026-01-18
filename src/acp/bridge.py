@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
-from src.acp.commons import app_settings, db_manager
-from src.acp.dbz import TargetRepo, DepositStatus, DatabaseManager, Dataset, DataFile
+from src.acp.commons import app_settings
+from src.acp.db.dbz import TargetRepo, DepositStatus, Dataset, DataFile, DatabaseManager
 from src.acp.models.assistant_datamodel import Target
 from src.acp.models.bridge_output_model import TargetDataModel
 
@@ -15,51 +16,21 @@ from src.acp.models.bridge_output_model import TargetDataModel
 class Bridge(ABC):
     """
     Abstract base class representing a bridge between the Assistant and a specific target repository.
-
-    Attributes:
-        dataset_id (str): Identifier for the dataset.
-        target (Target): Information about the target repository.
-        db_manager (DatabaseManager): Database manager for interacting with the data store.
-        metadata_rec (Dataset): Record representing the dataset metadata.
-        app_name (str): Name of the application associated with the dataset.
-        data_file_rec (DataFile): Record representing the data file associated with the dataset.
-        dataset_dir (str): Directory path for the dataset.
-
-    Methods:
-        __post_init__(): Initializes the Bridge object after its creation.
-        deposit() -> BridgeOutputModel: Abstract method to deposit data into the target repository.
-        save_state(bridge_output_model: BridgeOutputModel = None) -> type(None): Saves the state of the deposit
-        process, updating the deposit status in the database.
-
-    Note:
-        This class is expected to be subclassed with a concrete implementation of the `deposit` method.
     """
 
     dataset_id: str
     target: Target
-    db_manager: DatabaseManager = field(init=False)
-    metadata_rec: Dataset = field(init=False)
-    app_name: str = field(init=False)
-    data_file_rec: DataFile = field(init=False)
+    db_manager: DatabaseManager
+    dataset_rec: Dataset = field(init=False)
+    app_name: str
     dataset_dir: str = field(init=False)
 
     def __post_init__(self):
         """
-        Initializes the Bridge object after its creation.
-
-        The method sets up various attributes by querying the database using the provided dataset_id.
-        It also sets default values for attributes like `db_manager`, `metadata_rec`, `app_name`, `data_file_rec`,
-        and `dataset_dir`.
-
-        Note:
-            This method is automatically called by the dataclasses plugin after the object is created.
+        Initializes the Bridge object after its creation by setting up attributes.
         """
-        object.__setattr__(self, 'db_manager', db_manager)
-        object.__setattr__(self, 'metadata_rec', self.db_manager.find_dataset(self.dataset_id))
-        object.__setattr__(self, 'app_name', self.metadata_rec.app_name)
-        object.__setattr__(self, 'data_file_rec', self.db_manager.find_files(self.dataset_id))
-        object.__setattr__(self, 'dataset_dir', os.path.join(app_settings.DATA_TMP_BASE_DIR,
-                                                             self.app_name, self.dataset_id))
+        object.__setattr__(self, 'dataset_rec', self.db_manager.find_dataset_by_id(self.dataset_id))
+        object.__setattr__(self, 'dataset_dir', os.path.join(app_settings.DATA_TMP_BASE_DIR, self.app_name, str(self.dataset_id)))
         self.save_state()
 
     @classmethod
@@ -67,29 +38,40 @@ class Bridge(ABC):
     def job(cls) -> TargetDataModel:
         """
         Abstract method to be implemented by subclasses to perform a specific job.
-
-        Returns:
-            TargetDataModel: The result of the job execution.
         """
         ...
 
-    def save_state(self, output_data_model: TargetDataModel = None) -> type(None):
+    def save_state(self, output_data_model: TargetDataModel = None) -> None:
         """
         Saves the state of the deposit process, updating the deposit status in the database.
-
-        Args:
-            output_data_model (BridgeOutputModel, optional): An instance of BridgeOutputModel representing the
-                output of the deposit process. Defaults to None.
         """
-
         deposit_status = output_data_model.deposit_status if output_data_model else DepositStatus.PROGRESS
         duration = output_data_model.response.duration if output_data_model else 0.0
-        output = output_data_model.model_dump_json() if output_data_model else ''
+        target_service_response = output_data_model.model_dump_json() if output_data_model else None
+        deposited_version = output_data_model.deposited_version if output_data_model else None
+        external_identifiers = [
+            {
+                "value": item.value,
+                "protocol": item.protocol.value,
+                "url": item.url,
+                "api-url": item.api_url,
+            }
+            for item in output_data_model.external_identifiers
+        ] if (output_data_model and output_data_model.external_identifiers) else None
         if output_data_model:
-            logging.info(f'Save state for dataset_id: {self.dataset_id}. Target: {self.target.repo_name}')
-        db_manager.update_target_repo_deposit_status(TargetRepo(ds_id=self.dataset_id, name=self.target.repo_name,
-                                                                deposit_status=deposit_status, target_output=output,
-                                                                duration=duration))
+            logging.info(
+                f"Save state for dataset_id: {self.dataset_id}. Target: {self.target.repo_name}. "
+                f"Deposited version: {deposited_version}. str_external_identifiers: {external_identifiers}"
+            )
 
-    def deposit_files(self):
-        pass
+        self.db_manager.update_target_repo_deposit_status(
+            TargetRepo(
+                dataset_id=self.dataset_id,
+                name=self.target.repo_name,
+                deposit_status=deposit_status.upper(),
+                target_service_response=target_service_response,
+                deposit_duration=duration,
+                deposited_version=deposited_version,
+                external_identifiers=external_identifiers,
+            )
+        )
