@@ -38,7 +38,7 @@ COPY README.md .
 COPY uv.lock .
 RUN chmod +x ${BASE_DIR}/resources/utils/ingest.sh
 
-RUN uv venv .venv
+RUN uv venv --clear .venv
 # Install dependencies
 
 RUN uv sync --frozen --no-cache
