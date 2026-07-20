@@ -14,8 +14,9 @@ def execute_dataset_deposit(
     """
     Execute dataset deposit as a background RQ job.
 
-    This function is called by RQ workers to process dataset deposits.
-    It reconstructs its own database manager and follows the bridge process.
+    This is the entry point called by the RQ worker process.
+    It reconstructs its own database manager (never passed via queue)
+    and delegates to run_bridge_deposit — the pure synchronous deposit logic.
 
     Args:
         app_name: The name of the application/target
@@ -26,34 +27,29 @@ def execute_dataset_deposit(
         dict: Status information about the completed deposit
     """
     from src.acp.commons import get_db_manager
-    from src.acp.api.protected import follow_bridge
+    from src.acp.api.protected import run_bridge_deposit
 
-    logger.info(f"Starting deposit job for dataset {dataset_id} in app {app_name}")
-    logger.info(f"Request source: {request_source}")
+    logger.info(
+        f"Worker: starting deposit job for dataset {dataset_id} (app={app_name}, source={request_source})"
+    )
 
     try:
-        # Reconstruct database manager from environment
+        # Reconstruct database manager inside the worker — never serialised through Redis
         db_manager = get_db_manager(app_name)
 
-        # Execute the bridge process
-        follow_bridge(
+        result = run_bridge_deposit(
             db_manager=db_manager,
             app_name=app_name,
             dataset_id=dataset_id,
+            request_source=request_source,
         )
 
-        logger.info(f"Deposit job completed successfully for dataset {dataset_id}")
-
-        return {
-            "app_name": app_name,
-            "dataset_id": dataset_id,
-            "status": "completed",
-        }
+        logger.info(f"Worker: deposit job completed for dataset {dataset_id}")
+        return result
 
     except Exception as e:
         logger.error(
-            f"Deposit job failed for dataset {dataset_id}: {e}",
+            f"Worker: deposit job failed for dataset {dataset_id}: {e}",
             exc_info=True,
         )
         raise
-
