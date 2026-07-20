@@ -303,18 +303,24 @@ def send_mail(subject: str, text: str, recipients: list[str] = None):
     Raises:
         ValueError: If there is an error sending the email.
     """
-    sender_email = app_settings.MAIL_USR
-    app_password = app_settings.MAIL_PASS
-    recipients = recipients or list(app_settings.MAIL_TO)
+    send_mail_enabled = app_settings.get('send_mail', app_settings.get('SENDMAIL_ENABLE', True))
+    if not send_mail_enabled:
+        logging.info("Sending email is disabled.")
+        return
+
+    sender_email = app_settings.get("MAIL_USR")
+    app_password = app_settings.get("MAIL_PASS")
+    configured_recipients = app_settings.get("MAIL_TO", [])
+    recipients = recipients or list(configured_recipients)
+
+    if not sender_email or not app_password or not recipients:
+        logging.warning("Mail settings are incomplete; skipping email notification.")
+        return
 
     message = MIMEMultipart()
     message['From'] = sender_email
     message['Subject'] = f'{app_settings.get("MAIL_SUBJECT_PREFIX", "mail_subject_prefix not set")}: {subject}'
     message.attach(MIMEText(text, 'plain'))
-
-    if not app_settings.get('send_mail', True):
-        logging.info("Sending email is disabled.")
-        return
 
     try:
         with smtplib.SMTP(app_settings.SMTP_SERVER, app_settings.SMTP_PORT) as server:
@@ -652,7 +658,8 @@ def fetch_from_assistant_config(endpoint: str) -> str:
     Raises:
         HTTPException: If the request fails with a non-200 status code.
     """
-    repo_url = f'{app_settings.ASSISTANT_CONFIG_URL}/{endpoint}'
+    assistant_config_url = os.getenv("ASSISTANT_CONFIG_URL", app_settings.ASSISTANT_CONFIG_URL).rstrip('/')
+    repo_url = f'{assistant_config_url}/{endpoint}'
     logging.info(f'Fetching data from {repo_url}')
     response = requests.get(repo_url, headers=assistant_repo_headers)
     if response.status_code != 200:

@@ -2,11 +2,11 @@
 log_file = "@format {env[BASE_DIR]}/logs/acp.log"
 log_format = "%(asctime)s %(levelname)s %(name)s %(threadName)s : %(message)s"
 log_level = 10
-otlp_enable = false
+otlp_enable = true
 #db_dialect="sqlite"
 db_dialect="postgresql+psycopg2"
 #db_url = "@format ///{env[BASE_DIR]}/data/db"
-db_url = "acp:2004asinnuriahK12Amal10@localhost:5432"
+db_url = "acp:1012akmi2004@localhost:5432"
 data_db_file = "sqlite:{@format {env[BASE_DIR]}/data/db/acp.db}"
 data_tmp_base_dir = "@format {env[BASE_DIR]}/data/tmp"
 data_tmp_base_tus_files_dir = "@format {env[BASE_DIR]}/data/tmp/tus-files"

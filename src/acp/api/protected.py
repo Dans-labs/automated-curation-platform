@@ -6,7 +6,6 @@ import logging
 import mimetypes
 import os
 import shutil
-import threading
 import time
 import uuid
 from datetime import datetime
@@ -16,6 +15,7 @@ from typing import Callable, Awaitable, Optional
 import requests
 import jmespath
 from fastapi import APIRouter, Request, HTTPException
+from rq import Retry
 
 from src.acp.commons import (app_settings, data,
                              get_class, handle_ps_exceptions, \
@@ -27,6 +27,7 @@ from src.acp.models.app_model import ResponseDataModel, InboxDatasetDataModel
 # Import custom plugins and classes
 from src.acp.models.assistant_datamodel import RepoAssistantDataModel, Target
 from src.acp.models.bridge_output_model import TargetsCredentialsModel
+from src.acp.jobs.queue import get_deposit_queue
 
 # Create an API router instance
 router = APIRouter()
@@ -576,24 +577,40 @@ def calculate_sha1_checksum(file_path: str) -> str:
 
 def bridge_job(db_manager, app_name, dataset_id: str, msg: str) -> None:
     """
-    Start a new thread to follow the bridge process for a dataset.
+    Enqueue a dataset deposit job using RQ.
 
-    This function starts a new thread to execute the `follow_bridge` function for the given dataset ID.
-    It logs the start of the threading process and handles any exceptions that occur.
+    This function enqueues a deposit job to be processed by RQ workers.
+    The job will reconstruct its own database manager to avoid serialization issues.
 
     Args:
-        datasetId (str): The ID of the dataset to follow the bridge process for.
-        msg (str): A message to log when starting the threading process.
+        db_manager: Database manager instance (not passed to RQ, only used for context)
+        app_name: The name of the application/target
+        dataset_id: The ID of the dataset to process
+        msg: A message to log when enqueuing the job
 
     Returns:
         None
     """
-    logging.info(f"Starting threading for {msg} with datasetId: {dataset_id}")
+    logging.info(f"Enqueuing deposit job for {msg} with datasetId: {dataset_id}")
     try:
-        threading.Thread(target=follow_bridge, args=(db_manager, app_name, dataset_id,)).start()
-        logging.info(f"Threading for {dataset_id} started successfully.")
+        queue = get_deposit_queue()
+        job = queue.enqueue(
+            "src.acp.jobs.deposit.execute_dataset_deposit",
+            app_name=app_name,
+            dataset_id=dataset_id,
+            request_source=msg,
+            job_id=f"deposit_{app_name}_{dataset_id}",
+            retry=Retry(
+                max=3,
+                interval=[60, 300, 900],
+            ),
+            job_timeout=3600,
+            result_ttl=7 * 24 * 3600,
+            failure_ttl=30 * 24 * 3600,
+        )
+        logging.info(f"Deposit job {job.id} for {dataset_id} enqueued successfully.")
     except Exception as e:
-        logging.error(f"Error starting thread for {dataset_id}: {e}")
+        logging.error(f"Error enqueuing deposit job for {dataset_id}: {e}", exc_info=True)
 
 
 def follow_bridge(db_manager, app_name, dataset_id: str) -> type(None):
