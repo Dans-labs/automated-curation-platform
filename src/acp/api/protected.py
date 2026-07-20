@@ -575,30 +575,60 @@ def calculate_sha1_checksum(file_path: str) -> str:
     return sha1.hexdigest()
 
 
-def bridge_job(db_manager, app_name, dataset_id: str, msg: str) -> None:
+def run_bridge_deposit(
+    db_manager,
+    app_name: str,
+    dataset_id: str,
+    request_source: str,
+) -> dict:
     """
-    Enqueue a dataset deposit job using RQ.
+    Synchronous business logic for executing a dataset deposit.
 
-    This function enqueues a deposit job to be processed by RQ workers.
-    The job will reconstruct its own database manager to avoid serialization issues.
+    No thread creation. No queue submission.
+    This is the function called by RQ workers and contains the real deposit work.
 
     Args:
-        db_manager: Database manager instance (not passed to RQ, only used for context)
+        db_manager: Database manager instance (already constructed by the caller)
         app_name: The name of the application/target
-        dataset_id: The ID of the dataset to process
-        msg: A message to log when enqueuing the job
+        dataset_id: The ID of the dataset to deposit
+        request_source: The origin of the deposit request (for logging)
 
     Returns:
-        None
+        dict: Status information about the completed deposit
     """
-    logging.info(f"Enqueuing deposit job for {msg} with datasetId: {dataset_id}")
+    logging.info(f"run_bridge_deposit: starting deposit for {dataset_id} (source: {request_source})")
+    follow_bridge(db_manager, app_name, dataset_id)
+    return {
+        "app_name": app_name,
+        "dataset_id": dataset_id,
+        "status": "completed",
+    }
+
+
+def enqueue_bridge_deposit(
+    app_name: str,
+    dataset_id: str,
+    request_source: str,
+) -> None:
+    """
+    Submit run_bridge_deposit to the RQ deposit queue.
+
+    The db_manager is intentionally NOT passed here — the RQ worker
+    reconstructs it inside the job to avoid serialization issues.
+
+    Args:
+        app_name: The name of the application/target
+        dataset_id: The ID of the dataset to deposit
+        request_source: The origin of the deposit request (for logging)
+    """
+    logging.info(f"enqueue_bridge_deposit: enqueuing deposit for {dataset_id} (source: {request_source})")
     try:
         queue = get_deposit_queue()
         job = queue.enqueue(
             "src.acp.jobs.deposit.execute_dataset_deposit",
             app_name=app_name,
             dataset_id=dataset_id,
-            request_source=msg,
+            request_source=request_source,
             job_id=f"deposit_{app_name}_{dataset_id}",
             retry=Retry(
                 max=3,
@@ -611,6 +641,26 @@ def bridge_job(db_manager, app_name, dataset_id: str, msg: str) -> None:
         logging.info(f"Deposit job {job.id} for {dataset_id} enqueued successfully.")
     except Exception as e:
         logging.error(f"Error enqueuing deposit job for {dataset_id}: {e}", exc_info=True)
+
+
+def bridge_job(db_manager, app_name: str, dataset_id: str, msg: str) -> None:
+    """
+    Temporary compatibility wrapper.
+
+    Existing call sites pass db_manager, but the RQ path does not
+    need it here — it is reconstructed inside the worker.
+
+    Args:
+        db_manager: Unused by the queue path; kept for call-site compatibility
+        app_name: The name of the application/target
+        dataset_id: The ID of the dataset to process
+        msg: The request source message for logging
+    """
+    return enqueue_bridge_deposit(
+        app_name=app_name,
+        dataset_id=dataset_id,
+        request_source=msg,
+    )
 
 
 def follow_bridge(db_manager, app_name, dataset_id: str) -> type(None):
