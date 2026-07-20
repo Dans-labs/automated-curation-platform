@@ -42,6 +42,7 @@ from starlette.middleware.cors import CORSMiddleware
 from src.acp.api import protected, protected_admin, public
 from src.acp.commons import app_settings, data, inspect_bridge_plugin, \
     get_version, get_name, project_details, get_db_manager, retrieve_apps_list
+from src.acp.jobs.queue import initialize_queues
 from src.acp.tus_files import upload_files
 
 
@@ -51,7 +52,7 @@ async def lifespan(application: FastAPI):
     Lifespan event handler for the FastAPI application.
 
     This function is executed during the startup of the FastAPI application.
-    It initializes the database, iterates through saved bridge plugin directories,
+    It initializes the database, RQ queues, iterates through saved bridge plugin directories,
     and prints available bridge classes.
 
     Args:
@@ -62,6 +63,10 @@ async def lifespan(application: FastAPI):
 
     """
     print('start up')
+
+    # Initialize RQ queues for background jobs
+    initialize_queues()
+
     apps = retrieve_apps_list()
 
     if not apps:
@@ -83,7 +88,7 @@ api_keys = [app_settings.ACP_SERVICE_API_KEY]
 security = HTTPBearer()
 
 APP_NAME = os.environ.get("APP_NAME", project_details['title'])
-EXPOSE_PORT = os.environ.get("EXPOSE_PORT", 10124)
+EXPOSE_PORT = int(os.environ.get("EXPOSE_PORT", 10124))
 OTLP_GRPC_ENDPOINT = os.environ.get("OTLP_GRPC_ENDPOINT", "http://localhost:4317")
 
 def auth_header(request: Request, auth_cred: Annotated[HTTPAuthorizationCredentials, Depends(security)]):

@@ -173,3 +173,86 @@ In this demo, we will showcase how the Automated Curation Platform (ACP) can ing
     ```sh
         check_curation.sh --acp_token=<acp_authorization_token> --user=<user_id> --ras_name=demo-cid-to-dv-zenodo
     ```
+
+---
+
+## 🎯 Running from PyCharm
+
+### Setup
+
+1. **Open the project in PyCharm:**
+   - File → Open → `/Users/akmi/dev/work/dans/odissei-acp-poc`
+
+2. **Configure Python Interpreter:**
+   - PyCharm → Preferences (or File → Settings)
+   - Project → Python Interpreter
+   - Click ⚙️ → Add
+   - Select "Existing Environment"
+   - Choose: `/Users/akmi/dev/work/dans/odissei-acp-poc/services/acp/.venv/bin/python`
+   - Click OK
+
+3. **Install Dependencies:**
+   - Open Terminal in PyCharm (View → Tool Windows → Terminal)
+   - Run:
+     ```bash
+     cd services/acp
+     uv sync
+     ```
+
+### Create Run Configuration
+
+1. **Run → Edit Configurations...**
+2. **Click + → Python**
+3. **Fill in the following:**
+   - **Name:** `ACP (Local)`
+   - **Module name:** `src.main` (⚠️ NOT Script path)
+   - **Working directory:** `/Users/akmi/dev/work/dans/odissei-acp-poc/services/acp`
+   - **Python interpreter:** Select the ACP venv you set up above
+   - **Environment variables:**
+     ```
+     BASE_DIR=/Users/akmi/dev/work/dans/odissei-acp-poc/services/acp;
+     PYTHONPATH=/Users/akmi/dev/work/dans/odissei-acp-poc/services/acp/src;
+     EXPOSE_PORT=10124;
+     DB_DIALECT=postgresql+psycopg2;
+     DB_URL=acp:1012akmi2004@localhost:5432;
+     ASSISTANT_CONFIG_URL=http://localhost:2810;
+     TRANSFORMER_URL=http://localhost:1745/transform;
+     OTLP_GRPC_ENDPOINT=http://localhost:4317
+     ```
+
+4. **Click Apply → OK**
+
+### Run ACP
+
+- Click the **Run** button (▶️) or press **Ctrl+R** (macOS: **Cmd+R**)
+- ACP will start on **http://localhost:10124**
+- Swagger UI: **http://localhost:10124/docs**
+
+### Debug Mode
+
+- Click the **Debug** button (🐛) instead of Run to step through code
+- Set breakpoints by clicking in the gutter next to line numbers
+
+### Prerequisites for Local Running
+
+- **PostgreSQL** must be running and initialized with ACP schema
+- **MTS** (Metadata Transformer Service) must be running on http://localhost:1745
+- **ACA** (ACP Config Assistant) must be running on http://localhost:2810
+
+### Troubleshooting
+
+- **ModuleNotFoundError: No module named 'src.acp'?**
+  - Make sure you're using **Module name** `src.main`, NOT **Script path**
+  - Verify **Working directory** is set to the `services/acp` folder
+
+- **Database connection error?**
+  - Ensure PostgreSQL is running: `brew services start postgresql` (macOS)
+  - Check DB_URL in environment variables matches your local setup
+
+- **Service not found (MTS, ACA)?**
+  - Ensure both MTS and ACA are running on their respective ports (1745, 2810)
+  - Update ASSISTANT_CONFIG_URL and TRANSFORMER_URL if using different hosts/ports
+
+- **Dependencies not found?**
+  - Ensure Python interpreter is the ACP venv (check status bar at bottom-right)
+  - Run `uv sync` again in the terminal
