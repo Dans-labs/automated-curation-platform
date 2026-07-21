@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from rq import Retry, get_current_job
@@ -11,20 +12,29 @@ from src.acp.plugins.harvesters.registry import (
     create_harvester_plugin,
 )
 from src.acp.queue.connection import get_ingest_queue
+from src.acp.commons import retrieve_targets_configuration
 
 
 def harvest_provider(
     *,
     batch_id: str,
-    assistant_config: dict[str, Any],
+    assistant_config_name: str,
+    assistant_config_version: str | None = None,
     from_date: str | None = None,
     until_date: str | None = None,
     limit: int | None = None,
 ) -> dict[str, Any]:
     current_job = get_current_job()
 
+    assistant_config = _load_assistant_config(
+        assistant_config_name=assistant_config_name,
+        assistant_config_version=assistant_config_version,
+    )
     source_config = assistant_config["source"]
-    plugin_name = source_config["plugin"]
+    plugin_name = source_config.get("plugin") or source_config.get("type")
+
+    if not plugin_name:
+        raise ValueError("Assistant config source must define plugin/type")
 
     plugin = create_harvester_plugin(
         plugin_name=plugin_name,
@@ -71,7 +81,8 @@ def harvest_provider(
         queue.enqueue(
             "src.acp.jobs.ingestion.ingest_harvested_record",
             batch_id=batch_id,
-            assistant_config=assistant_config,
+            assistant_config_name=assistant_config_name,
+            assistant_config_version=assistant_config_version,
             harvested_record=record.model_dump(
                 mode="json"
             ),
@@ -107,9 +118,36 @@ def harvest_provider(
 
     return {
         "batch_id": batch_id,
+        "assistant_config_name": assistant_config_name,
+        "assistant_config_version": assistant_config_version,
         "queued_records": queued,
         "deleted_records": deleted,
     }
+
+
+def _load_assistant_config(
+    *,
+    assistant_config_name: str,
+    assistant_config_version: str | None,
+) -> dict[str, Any]:
+    raw_config = retrieve_targets_configuration(
+        assistant_config_name,
+        assistant_config_version=assistant_config_version,
+    )
+
+    try:
+        config = json.loads(raw_config)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"Invalid assistant config payload for {assistant_config_name}"
+        ) from exc
+
+    if "source" not in config:
+        raise ValueError(
+            f"Assistant config {assistant_config_name} is missing source"
+        )
+
+    return config
 
 
 def normalize_identifier(value: str) -> str:

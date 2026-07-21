@@ -668,7 +668,10 @@ def fetch_from_assistant_config(endpoint: str) -> str:
     return response.json()
 
 @handle_ps_exceptions
-def retrieve_targets_configuration(assistant_config_name: str) -> str:
+def retrieve_targets_configuration(
+    assistant_config_name: str,
+    assistant_config_version: str | None = None,
+) -> str:
     """
     Retrieve the configuration for the specified assistant.
 
@@ -678,6 +681,11 @@ def retrieve_targets_configuration(assistant_config_name: str) -> str:
     Returns:
         str: The JSON response containing the assistant configuration.
     """
+    if assistant_config_version:
+        return fetch_from_assistant_config(
+            f"name/{assistant_config_name}/version/{assistant_config_version}"
+        )
+
     return fetch_from_assistant_config(f'name/{assistant_config_name}')
 
 @handle_ps_exceptions
@@ -696,7 +704,12 @@ async def get_repo_assistant(req):
     if not assistant_name:
         raise HTTPException(status_code=400, detail="assistant-config-name")
 
-    repo_config = retrieve_targets_configuration(assistant_name)
+    assistant_version = req.headers.get('assistant-config-version')
+
+    repo_config = retrieve_targets_configuration(
+        assistant_name,
+        assistant_config_version=assistant_version,
+    )
     return RepoAssistantDataModel.model_validate_json(repo_config)
 
 

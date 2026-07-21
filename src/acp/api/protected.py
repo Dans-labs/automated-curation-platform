@@ -59,6 +59,7 @@ async def get_inbox_dataset_dc(request: Request, status: StateVersion) -> (
 
     return InboxDatasetDataModel(
         assistant_name=request.headers.get('assistant-config-name'),
+        assistant_version=request.headers.get('assistant-config-version'),
         status=status,
         owner_id=request.headers.get('user-id'),
         metadata_type=MetadataType(ct),
