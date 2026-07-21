@@ -44,7 +44,7 @@ class OAIPMHSourceConfig(BaseModel):
     )
 
     verify_ssl: bool = True
-    user_agent: str = "ODISSEI-ACP-Harvester/0.1"
+    user_agent: str = "ORCHESTRATOR-ACP-Harvester/0.1"
 
     authentication: OAIPMHAuthentication | None = None
 
