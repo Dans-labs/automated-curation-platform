@@ -181,14 +181,14 @@ In this demo, we will showcase how the Automated Curation Platform (ACP) can ing
 ### Setup
 
 1. **Open the project in PyCharm:**
-   - File → Open → `/Users/akmi/dev/work/dans/odissei-acp-poc`
+   - File → Open → `/Users/akmi/dev/work/dans/orchestrator-acp-poc`
 
 2. **Configure Python Interpreter:**
    - PyCharm → Preferences (or File → Settings)
    - Project → Python Interpreter
    - Click ⚙️ → Add
    - Select "Existing Environment"
-   - Choose: `/Users/akmi/dev/work/dans/odissei-acp-poc/services/acp/.venv/bin/python`
+   - Choose: `/Users/akmi/dev/work/dans/orchestrator-acp-poc/services/acp/.venv/bin/python`
    - Click OK
 
 3. **Install Dependencies:**
@@ -206,12 +206,12 @@ In this demo, we will showcase how the Automated Curation Platform (ACP) can ing
 3. **Fill in the following:**
    - **Name:** `ACP (Local)`
    - **Module name:** `src.main` (⚠️ NOT Script path)
-   - **Working directory:** `/Users/akmi/dev/work/dans/odissei-acp-poc/services/acp`
+   - **Working directory:** `/Users/akmi/dev/work/dans/orchestrator-acp-poc/services/acp`
    - **Python interpreter:** Select the ACP venv you set up above
    - **Environment variables:**
      ```
-     BASE_DIR=/Users/akmi/dev/work/dans/odissei-acp-poc/services/acp;
-     PYTHONPATH=/Users/akmi/dev/work/dans/odissei-acp-poc/services/acp/src;
+     BASE_DIR=/Users/akmi/dev/work/dans/orchestrator-acp-poc/services/acp;
+     PYTHONPATH=/Users/akmi/dev/work/dans/orchestrator-acp-poc/services/acp/src;
      EXPOSE_PORT=10124;
      DB_DIALECT=postgresql+psycopg2;
      DB_URL=acp:1012akmi2004@localhost:5432;

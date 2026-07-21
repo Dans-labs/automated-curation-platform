@@ -65,7 +65,7 @@ class OaiHarvesterClientGetRecord(Bridge):
 
         str: The version of the OAI-PMH harvester client.
         """
-        return {"workflow_orchestrator": None, "created_on": "26-11-2024 12:05:19", "DANS-transformer-service": {"name": "DANS-transformer-service", "version": "0.5.9", "docker-image": "ekoindarto/dans-transformer-service:0.5.9", "endpoint": "https://transformer.labs.dansdemo.nl/transform-xml-to-json/true"}, "dataverse-importer": {"name": "dataverse-importer", "version": None, "docker-image": "fjodorvr/dataverse-importer:0.1.1", "endpoint": "https://dataverse-importer.labs.dansdemo.nl", "github-release": "https://github.com/odissei-data/dataverse-importer/releases/tag/v0.1.0-alpha"}}
+        return {"workflow_orchestrator": None, "created_on": "26-11-2024 12:05:19", "DANS-transformer-service": {"name": "DANS-transformer-service", "version": "0.5.9", "docker-image": "ekoindarto/dans-transformer-service:0.5.9", "endpoint": "https://transformer.labs.dansdemo.nl/transform-xml-to-json/true"}, "dataverse-importer": {"name": "dataverse-importer", "version": None, "docker-image": "fjodorvr/dataverse-importer:0.1.1", "endpoint": "https://dataverse-importer.labs.dansdemo.nl", "github-release": "https://github.com/orchestrator-data/dataverse-importer/releases/tag/v0.1.0-alpha"}}
 
     def store_workflow_version(version_dict):
         """ Stores the workflow version dictionary.

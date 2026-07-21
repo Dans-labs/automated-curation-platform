@@ -41,10 +41,10 @@ def dataverse_mapper(record, pm: ProcessedMetadata):
     }
 
     data = {'metadata': record}
-    with open("/Users/akmi/git/INFRA/automated-curation-platform/resources/templates/odissei/base_dataverse_template.json") as f:
+    with open("/Users/akmi/git/INFRA/automated-curation-platform/resources/templates/orchestrator/base_dataverse_template.json") as f:
         template = json.load(f)
         data['template'] = template
-    with open("/Users/akmi/git/INFRA/automated-curation-platform/resources/templates/odissei/base-mapping.json") as f:
+    with open("/Users/akmi/git/INFRA/automated-curation-platform/resources/templates/orchestrator/base-mapping.json") as f:
         mapping = json.load(f)
         data['mapping'] = mapping
     data["has_existing_doi"] = True
@@ -193,7 +193,7 @@ def add_workflow_versioning_url(record, pm: ProcessedMetadata, pms: [ProcessedMe
         mapper = get_service_version(
             service_url='https://dataverse-mapper.labs.dansdemo.nl/version',
             service_name=mapper_name,
-            github_username='odissei-data',
+            github_username='orchestrator-data',
             github_repo=mapper_name,
             docker_username='fjodorvr',
             image_repo=mapper_name,
@@ -206,7 +206,7 @@ def add_workflow_versioning_url(record, pm: ProcessedMetadata, pms: [ProcessedMe
         fetcher = get_service_version(
             service_url='https://dataverse-fetcher.labs.dansdemo.nl/version',
             service_name=fetcher_name,
-            github_username='odissei-data',
+            github_username='orchestrator-data',
             github_repo=fetcher_name,
             docker_username='fjodorvr',
             image_repo=fetcher_name,
@@ -234,7 +234,7 @@ def add_workflow_versioning_url(record, pm: ProcessedMetadata, pms: [ProcessedMe
         importer = get_service_version(
             service_url='https://dataverse-importer.labs.dansdemo.nl',
             service_name=importer_name,
-            github_username='odissei-data',
+            github_username='orchestrator-data',
             github_repo=importer_name,
             docker_username='fjodorvr',
             image_repo=importer_name,
@@ -248,7 +248,7 @@ def add_workflow_versioning_url(record, pm: ProcessedMetadata, pms: [ProcessedMe
             service_url='https://dataverse-date-updater.labs.dansdemo.nl/'
                         'version',
             service_name=updater_name,
-            github_username='odissei-data',
+            github_username='orchestrator-data',
             github_repo=updater_name,
             docker_username='fjodorvr',
             image_repo=updater_name,
@@ -262,7 +262,7 @@ def add_workflow_versioning_url(record, pm: ProcessedMetadata, pms: [ProcessedMe
         refiner = get_service_version(
             service_url='https://metadata-refiner.labs.dansdemo.nl/version',
             service_name=refiner_name,
-            github_username='odissei-data',
+            github_username='orchestrator-data',
             github_repo=refiner_name,
             docker_username='fjodorvr',
             image_repo=refiner_name,
@@ -275,7 +275,7 @@ def add_workflow_versioning_url(record, pm: ProcessedMetadata, pms: [ProcessedMe
         enhancer = get_service_version(
             service_url='https://metadata-enhancer.labs.dansdemo.nl/version',
             service_name=enhancer_name,
-            github_username='odissei-data',
+            github_username='orchestrator-data',
             github_repo=enhancer_name,
             docker_username='fjodorvr',
             image_repo=enhancer_name,
