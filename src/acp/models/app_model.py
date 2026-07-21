@@ -46,6 +46,7 @@ class InboxDatasetDataModel:
     """
     id : str = ""
     assistant_name: str
+    assistant_version: str | None = None
     target_creds: str
     owner_id: str
     title: str = ''
