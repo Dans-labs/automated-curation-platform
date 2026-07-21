@@ -27,7 +27,8 @@ from src.acp.models.app_model import ResponseDataModel, InboxDatasetDataModel
 # Import custom plugins and classes
 from src.acp.models.assistant_datamodel import RepoAssistantDataModel, Target
 from src.acp.models.bridge_output_model import TargetsCredentialsModel
-from src.acp.jobs.queue import get_deposit_queue
+from src.acp.jobs.rq_queue import get_deposit_queue
+from src.acp.rq_deposit.enqueue import enqueue_dataset_deposit
 
 # Create an API router instance
 router = APIRouter()
@@ -187,14 +188,26 @@ async def process_inbox(status, request):
 
     if status != StateVersion.DRAFT and db_manager.is_dataset_ready(dataset.id) and db_manager.are_files_uploaded(dataset.id):
         logging.debug(f'SUBMIT DATASET with version {status.name} is_dataset_ready {dataset.id}')
-        bridge_job(db_manager, repo_assistant.app_name, dataset.id, f"/inbox/dataset/{idh.status}")
+        deposit_job = enqueue_dataset_deposit(
+            app_name=repo_assistant.app_name,
+            dataset_id=str(dataset.id),
+            request_source=f"/inbox/dataset/{idh.status}",
+        )
+        logging.info(
+            "Dataset queued for deposit: %s",
+            deposit_job,
+        )
     else:
         logging.debug(f'NOT READY to submit dataset with version {status.name} dataset_id: {dataset.id} '
                f'\nNumber still registered: {len(db_manager.find_registered_files(dataset.id))}')
-        # Create the ResponseDataModel with the required dataset_id
+        deposit_job = None
+    # Create the ResponseDataModel with the required dataset_id
     rdm = ResponseDataModel(status="OK")
     rdm.dataset_id = str(dataset.id)
     rdm.start_process = db_manager.is_dataset_ready(dataset.id)
+    if deposit_job:
+        rdm.deposit_job_id = deposit_job["job_id"]
+        rdm.deposit_job_status = deposit_job["status"]
     return rdm
 
 

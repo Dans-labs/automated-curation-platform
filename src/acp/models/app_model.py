@@ -19,10 +19,14 @@ class ResponseDataModel(BaseModel):
         status (str): The status of the response.
         dataset_id (str): The ID of the dataset, aliased as 'dataset-id'.
         start_process (Optional[bool]): Indicates whether to start the process, aliased as 'start-process'.
+        deposit_job_id (Optional[str]): The ID of the deposit job, aliased as 'deposit-job-id'.
+        deposit_job_status (Optional[str]): The status of the deposit job, aliased as 'deposit-job-status'.
     """
     status: str = ''
     dataset_id: str = Field('', alias='dataset-id')
     start_process: Optional[bool] = Field(False, alias='start-process')
+    deposit_job_id: Optional[str] = Field(None, alias='deposit-job-id')
+    deposit_job_status: Optional[str] = Field(None, alias='deposit-job-status')
 
 
 @dataclass(frozen=True, kw_only=True)
