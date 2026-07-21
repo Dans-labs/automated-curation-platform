@@ -23,6 +23,7 @@ dependencies = [
     "pydantic>=2.10.6",
     "python-keycloak>=5.3.1",
     "python-multipart>=0.0.20",
+    "oaipmh-scythe>=0.13,<1",
     "redis>=5.2,<7.0",
     "rq>=2.5,<3.0",
     "sickle>=0.7.0",

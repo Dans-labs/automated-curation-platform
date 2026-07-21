@@ -37,3 +37,4 @@ def initialize_queues():
     get_deposit_queue()
     logger.info("All RQ queues initialized")
 
+
