@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import List, Optional, Any, Dict
 from urllib.parse import urlparse
@@ -12,7 +13,7 @@ from requests.exceptions import RequestException
 from starlette import status
 
 from src.acp.bridge import Bridge
-from src.acp.commons import transform, handle_deposit_exceptions
+from src.acp.commons import app_settings, transform, handle_deposit_exceptions
 from src.acp.db.dbz import DepositStatus
 from src.acp.models.bridge_output_model import TargetDataModel, TargetResponse, ResponseContentType, IdentifierItem
 
@@ -24,6 +25,39 @@ class ZenodoApiDepositor(Bridge):
     Inherits from:
         Bridge: The base class for all bridge implementations.
     """
+
+    @staticmethod
+    def _target_logger() -> logging.Logger:
+        logger = logging.getLogger("acp.target.zenodo")
+        log_path = os.path.join(os.environ["BASE_DIR"], "logs", "targets", "zenodo.log")
+        abs_log_path = os.path.abspath(log_path)
+        if not any(
+            isinstance(handler, logging.FileHandler)
+            and getattr(handler, "baseFilename", None) == abs_log_path
+            for handler in logger.handlers
+        ):
+            os.makedirs(os.path.dirname(abs_log_path), exist_ok=True)
+            handler = logging.FileHandler(abs_log_path)
+            handler.setFormatter(logging.Formatter(app_settings.LOG_FORMAT))
+            logger.addHandler(handler)
+        logger.setLevel(getattr(logging, str(app_settings.LOG_LEVEL).upper(), logging.INFO))
+        logger.propagate = False
+        return logger
+
+    @classmethod
+    def _log_target_info(cls, message: str, *args: Any) -> None:
+        logging.info(message, *args)
+        cls._target_logger().info(message, *args)
+
+    @classmethod
+    def _log_target_warning(cls, message: str, *args: Any) -> None:
+        logging.warning(message, *args)
+        cls._target_logger().warning(message, *args)
+
+    @classmethod
+    def _log_target_error(cls, message: str, *args: Any) -> None:
+        logging.error(message, *args)
+        cls._target_logger().error(message, *args)
 
     @property
     def headers(self) -> Dict[str, str]:
@@ -38,6 +72,16 @@ class ZenodoApiDepositor(Bridge):
             hdr["Authorization"] = f"Bearer {token}"
         return hdr
 
+    @staticmethod
+    def _log_zenodo_response(action: str, response: requests.Response) -> None:
+        ZenodoApiDepositor._log_target_info(
+            "Zenodo %s response: status_code=%s url=%s body=%s",
+            action,
+            response.status_code,
+            response.url,
+            response.text,
+        )
+
 
 
     @handle_deposit_exceptions
@@ -51,24 +95,47 @@ class ZenodoApiDepositor(Bridge):
         Returns:
         BridgeOutputDataModel: The output model containing the response from the Zenodo API and the status of the deposit.
         """
-        zenodo_resp = self.__create_initial_dataset()
-        tdm = TargetDataModel(response=zenodo_resp)
-        if zenodo_resp is None:
-            logging.error('Error occurs: status code: 500')
+        self._log_target_info(
+            "Zenodo deposit starting: dataset_id=%s target_repo=%s target_url=%s has_token=%s",
+            self.dataset_id,
+            self.target.repo_name,
+            self.target.target_url,
+            bool(getattr(self.target, "password", None)),
+        )
+        create_response = self.__create_initial_dataset()
+        tdm = TargetDataModel()
+        self._log_zenodo_response("create-initial-dataset", create_response)
+        if create_response.status_code != status.HTTP_201_CREATED:
+            self._log_target_error('Zenodo initial dataset creation failed: status code=%s', create_response.status_code)
             tdm.deposit_status = DepositStatus.ERROR
+            tdm.response = TargetResponse(
+                url=create_response.url,
+                status_code=create_response.status_code,
+                content=create_response.text,
+                content_type=ResponseContentType.TEXT,
+                error="Failed to create initial Zenodo dataset.",
+            )
             return tdm
+
+        zenodo_resp = create_response.json()
         zenodo_id = zenodo_resp.get("id")
         str_zenodo_dataset_metadata: str = transform(self.target.metadata.transformed_metadata[0].transformer_url,
                                                 self.dataset_rec.metadata_content)
 
         url = f'{self.target.target_url}/{zenodo_id}?{self.target.username}={self.target.password}'
-        logging.info(f"Send to {url}")
+        self._log_target_info("Zenodo metadata update request: dataset_id=%s zenodo_id=%s url=%s", self.dataset_id, zenodo_id, url)
         zen_resp = requests.put(url, data=str_zenodo_dataset_metadata, headers={"Content-Type": "application/json"})
-        logging.info(f'Zenodo response status code: {zen_resp.status_code}. Zenodo response: {zen_resp.text}')
+        self._log_zenodo_response("update-metadata", zen_resp)
         if zen_resp.status_code != status.HTTP_200_OK:
-            logging.error(f'Error occurs: status code: {zen_resp.status_code}')
+            self._log_target_error('Zenodo metadata update failed: status code=%s', zen_resp.status_code)
             tdm.deposited_metadata = "Error occurs: status code: " + str(zen_resp.status_code)
-            tdm.response = zen_resp.text
+            tdm.response = TargetResponse(
+                url=zen_resp.url,
+                status_code=zen_resp.status_code,
+                content=zen_resp.text,
+                content_type=ResponseContentType.TEXT,
+                error="Failed to update Zenodo metadata.",
+            )
             tdm.deposit_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")
             tdm.deposit_status = DepositStatus.ERROR
             return tdm
@@ -80,23 +147,41 @@ class ZenodoApiDepositor(Bridge):
             community_id = self.__get_community_id(comm_identifiers[0])
         else:
             tdm.deposit_status = DepositStatus.ERROR
-            tdm.deposit_status_message = "No or multiple community identifiers found in metadata."
-            logging.error("Error occurs: No or multiple community identifiers found in metadata.")
+            tdm.response = TargetResponse(
+                url=url,
+                status_code=zen_resp.status_code,
+                content=zen_resp.text,
+                content_type=ResponseContentType.JSON,
+                error="No or multiple community identifiers found in metadata.",
+            )
+            self._log_target_error("Error occurs: No or multiple community identifiers found in metadata.")
             return tdm
 
         if community_id:
             added = self.__add_deposition_to_community(zenodo_id, community_id)
             if not added:
-                logging.error(f"Error occurs: Could not add deposition {zenodo_id} to community {community_id}.")
+                self._log_target_error("Error occurs: Could not add deposition %s to community %s.", zenodo_id, community_id)
                 tdm.deposit_status = DepositStatus.ERROR
-                tdm.deposit_status_message="Could not add deposition to community."
+                tdm.response = TargetResponse(
+                    url=url,
+                    status_code=zen_resp.status_code,
+                    content=zen_resp.text,
+                    content_type=ResponseContentType.JSON,
+                    error="Could not add deposition to community.",
+                )
                 return tdm
 
             review_submitted = self.__submit_review(zenodo_id)
             if not review_submitted:
-                logging.error(f"Error occurs: Could not submit review for deposition {zenodo_id}.")
+                self._log_target_error("Error occurs: Could not submit review for deposition %s.", zenodo_id)
                 tdm.deposit_status = DepositStatus.ERROR
-                tdm.deposit_status_message="Could not submit review for deposition."
+                tdm.response = TargetResponse(
+                    url=url,
+                    status_code=zen_resp.status_code,
+                    content=zen_resp.text,
+                    content_type=ResponseContentType.JSON,
+                    error="Could not submit review for deposition.",
+                )
                 return tdm
 
         tdm.deposit_status =  DepositStatus.FINISH
@@ -109,7 +194,14 @@ class ZenodoApiDepositor(Bridge):
         target_resp.identifiers = [IdentifierItem(value=zm.metadata.prereserve_doi.doi if zm.metadata and zm.metadata.prereserve_doi else None, url=zm.links.html if zm.links else None)]
         target_resp.content_type = ResponseContentType.JSON
         tdm.response = target_resp
-        logging.info(f"Successfully deposited to Zenodo. Zenodo response: {zen_resp.text}")
+        self._log_target_info(
+            "Zenodo deposit finished successfully: dataset_id=%s zenodo_id=%s response_status=%s response_url=%s",
+            self.dataset_id,
+            zenodo_id,
+            zen_resp.status_code,
+            target_resp.url,
+        )
+        self._log_target_info("Successfully deposited to Zenodo. Zenodo response: %s", zen_resp.text)
         return tdm
 
 
@@ -136,20 +228,20 @@ class ZenodoApiDepositor(Bridge):
             resp = requests.get(url, headers=self.headers, timeout=30)
             resp.raise_for_status()
         except RequestException as exc:
-            logging.warning("HTTP request failed fetching community %s: %s", slug, exc)
+            self._log_target_warning("HTTP request failed fetching community %s: %s", slug, exc)
             return None
 
         try:
             data = resp.json()
         except json.JSONDecodeError as exc:
-            logging.warning("Failed parsing community response JSON: %s", exc)
+            self._log_target_warning("Failed parsing community response JSON: %s", exc)
             return None
 
         cid = data.get('id')
         if cid:
-            logging.info("Found community id: %s", cid)
+            self._log_target_info("Found community id: %s", cid)
             return cid
-        logging.warning("Community response did not contain 'id': %s", data)
+        self._log_target_warning("Community response did not contain 'id': %s", data)
         return None
 
     def __add_deposition_to_community(self, zenodo_id: int, community_id: str) -> bool:
@@ -159,25 +251,26 @@ class ZenodoApiDepositor(Bridge):
         try:
             resp = requests.put(url, headers=self.headers, data=json.dumps(payload), timeout=30)
         except RequestException as exc:
-            logging.warning("Network error when adding deposition %s to community %s: %s", zenodo_id, community_id, exc)
+            self._log_target_warning("Network error when adding deposition %s to community %s: %s", zenodo_id, community_id, exc)
             return False
 
+        self._log_zenodo_response("add-to-community", resp)
         if resp.status_code in (200, 201, 202, 204):
-            logging.info("Successfully added deposition %s to community %s (HTTP %s)", zenodo_id, community_id,
+            self._log_target_info("Successfully added deposition %s to community %s (HTTP %s)", zenodo_id, community_id,
                          resp.status_code)
             try:
                 if resp.text:
-                    logging.debug("Response JSON: %s", resp.json())
+                    self._target_logger().debug("Response JSON: %s", resp.json())
             except json.JSONDecodeError:
-                logging.debug("Response text (non-JSON): %s", resp.text)
+                self._target_logger().debug("Response text (non-JSON): %s", resp.text)
             return True
 
-        logging.warning("Failed to add deposition to community. HTTP %s: %s", resp.status_code, resp.text)
+        self._log_target_warning("Failed to add deposition to community. HTTP %s: %s", resp.status_code, resp.text)
         return False
 
 
     @handle_deposit_exceptions
-    def __create_initial_dataset(self) -> dict | None:
+    def __create_initial_dataset(self) -> requests.Response:
         """
         Creates an initial dataset on Zenodo.
 
@@ -186,11 +279,10 @@ class ZenodoApiDepositor(Bridge):
         Returns:
         dict | None: The response from the Zenodo API if the dataset is created successfully, otherwise None.
         """
-        logging.info('Create an initial zenodo dataset')
+        self._log_target_info('Create an initial zenodo dataset')
         response = requests.post(f"{self.target.base_url}/api/deposit/depositions",
                                  data="{}", headers=self.headers)
-        logging.info(f"Response status code: {response.status_code}")
-        return response.json() if response.status_code == 201 else None
+        return response
 
     def __ingest_files(self, bucket_url: str) -> dict:
         """
@@ -204,15 +296,24 @@ class ZenodoApiDepositor(Bridge):
         Returns:
         dict: A dictionary containing the status of the file ingestion process.
         """
-        logging.info(f'Ingesting files to {bucket_url}')
+        if not bucket_url:
+            raise RuntimeError("Zenodo bucket URL is missing; cannot ingest files.")
+        self._log_target_info('Ingesting files to %s', bucket_url)
         params = {'access_token': self.target.password, 'access_right': 'restricted'}
-        for file in self.db_manager.find_non_registered_files(dataset_id=self.dataset_id):
+        files = self.db_manager.find_non_registered_files(dataset_id=self.dataset_id)
+        self._log_target_info("Zenodo file ingest starting: dataset_id=%s file_count=%s", self.dataset_id, len(files))
+        for file in files:
             file_path = f"{file.path}"
-            logging.info(f'Ingesting file {file_path}')
+            self._log_target_info('Ingesting file %s', file_path)
             with open(file_path, "rb") as fp:
                 response = requests.put(f"{bucket_url}/{file.name}", data=fp, params=params)
-            logging.info(f"Response status code: {response.status_code} and message: {response.text}")
-        return {"status": status.HTTP_200_OK}
+            self._log_zenodo_response(f"ingest-file:{file.name}", response)
+            if response.status_code not in {status.HTTP_200_OK, status.HTTP_201_CREATED, status.HTTP_202_ACCEPTED}:
+                raise RuntimeError(
+                    f"Zenodo file ingest failed for {file.name}: status_code={response.status_code} body={response.text}"
+                )
+        self._log_target_info("Zenodo file ingest finished: dataset_id=%s file_count=%s", self.dataset_id, len(files))
+        return {"status": status.HTTP_200_OK, "file_count": len(files)}
 
     @handle_deposit_exceptions
     def __submit_review(self, zenodo_id: int) -> bool:
@@ -223,15 +324,12 @@ class ZenodoApiDepositor(Bridge):
         url = f"{self.target.base_url}/api/records/{zenodo_id}/draft/actions/submit-review"
 
         resp = requests.post(url, headers=self.headers, timeout=30)
+        self._log_zenodo_response("submit-review", resp)
         if resp.status_code in (200, 201, 202):
-            print(f"Successfully submitted review for {zenodo_id} (HTTP {resp.status_code})")
-            try:
-                print('Response:', resp.json())
-            except Exception:
-                print('Response text:', resp.text)
+            self._log_target_info("Successfully submitted review for %s (HTTP %s)", zenodo_id, resp.status_code)
             return True
 
-        print(f"Failed to submit review. HTTP {resp.status_code}: {resp.text}")
+        self._log_target_warning("Failed to submit review. HTTP %s: %s", resp.status_code, resp.text)
         return False
 
     @handle_deposit_exceptions
@@ -247,10 +345,10 @@ class ZenodoApiDepositor(Bridge):
         Returns:
         dict | None: The response from the Zenodo API if the dataset is published successfully, otherwise None.
         """
-        logging.info(f'Publishing zenodo dataset with id {zenodo_id}')
+        self._log_target_info('Publishing zenodo dataset with id %s', zenodo_id)
         response = requests.post(f"{self.target.target_url}/{zenodo_id}/actions/publish?{self.target.username}={self.target.password}",
                                  headers={"Content-Type": "application/json"})
-        logging.info(f"Response status code: {response.status_code}")
+        self._log_zenodo_response("publish-dataset", response)
         return response.json() if response.status_code == 202 else None
 
 class PrereserveDoi(BaseModel):
