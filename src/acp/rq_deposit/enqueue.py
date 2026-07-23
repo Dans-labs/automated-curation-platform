@@ -1,3 +1,4 @@
+import logging
 import re
 from typing import Any
 
@@ -12,7 +13,8 @@ from src.acp.rq_deposit.connection import (
 
 
 def normalize_job_id(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_.:-]+", "-", value)
+    normalized = re.sub(r"[^A-Za-z0-9_-]+", "-", value).strip("-")
+    return normalized or "deposit-job"
 
 
 def enqueue_dataset_deposit(
@@ -20,12 +22,22 @@ def enqueue_dataset_deposit(
     app_name: str,
     dataset_id: str,
     request_source: str,
+    force_requeue: bool = False,
 ) -> dict[str, Any]:
     connection = get_redis_connection()
     queue = get_deposit_queue()
 
     job_id = normalize_job_id(
         f"deposit:{app_name}:{dataset_id}"
+    )
+    logging.info(
+        "Preparing ACP deposit enqueue: app=%s dataset_id=%s request_source=%s queue=%s job_id=%s force_requeue=%s",
+        app_name,
+        dataset_id,
+        request_source,
+        queue.name,
+        job_id,
+        force_requeue,
     )
 
     try:
@@ -35,8 +47,19 @@ def enqueue_dataset_deposit(
         )
 
         existing_status = existing_job.get_status(refresh=True)
+        logging.info(
+            "Found existing ACP deposit job: job_id=%s status=%s",
+            existing_job.id,
+            existing_status,
+        )
 
-        if existing_status in {
+        if force_requeue and existing_status == "scheduled":
+            logging.info(
+                "Force requeue requested; deleting scheduled ACP deposit job: job_id=%s",
+                existing_job.id,
+            )
+            existing_job.delete()
+        elif existing_status in {
             "queued",
             "started",
             "deferred",
@@ -47,10 +70,11 @@ def enqueue_dataset_deposit(
                 "job_id": existing_job.id,
                 "status": existing_status,
                 "duplicate": True,
+                "force_requeue": force_requeue,
             }
 
     except NoSuchJobError:
-        pass
+        logging.info("No existing ACP deposit job found for job_id=%s", job_id)
 
     job = queue.enqueue(
         "src.acp.rq_deposit.jobs.execute_dataset_deposit",
@@ -76,10 +100,23 @@ def enqueue_dataset_deposit(
             "request_source": request_source,
         },
     )
+    try:
+        queued_count = len(queue.get_job_ids())
+    except Exception:
+        queued_count = None
+
+    logging.info(
+        "Queued ACP deposit job: job_id=%s status=%s queue=%s queued_count=%s",
+        job.id,
+        job.get_status(),
+        job.origin,
+        queued_count,
+    )
 
     return {
         "job_id": job.id,
         "queue": job.origin,
         "status": job.get_status(),
         "duplicate": False,
+        "force_requeue": force_requeue,
     }

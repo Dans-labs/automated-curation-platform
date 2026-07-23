@@ -33,15 +33,19 @@ ENV PATH="/home/akmi/acp/.venv/bin:$PATH"
 # Copy the application into the container.
 COPY src ./src
 COPY resources ./resources
+COPY conf /bootstrap/acp/conf
+COPY resources /bootstrap/acp/resources
+COPY docker-entrypoint.sh ./docker-entrypoint.sh
 COPY pyproject.toml .
 COPY README.md .
 COPY uv.lock .
-RUN chmod +x ${BASE_DIR}/resources/utils/ingest.sh
+RUN chmod +x ${BASE_DIR}/resources/utils/ingest.sh ${BASE_DIR}/docker-entrypoint.sh
 
 RUN uv venv --clear .venv
 # Install dependencies
 
-RUN uv sync --frozen --no-cache
+RUN uv sync --frozen --no-cache && \
+    chown -R akmi:akmi ${BASE_DIR} /bootstrap/acp
 
 # Run the application.
 CMD ["python", "-m", "src.main"]

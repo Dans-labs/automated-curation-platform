@@ -10,7 +10,7 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Awaitable, Optional
+from typing import Any, Callable, Awaitable, Optional
 
 import requests
 import jmespath
@@ -26,12 +26,18 @@ from src.acp.db.dbz import TargetRepo, DataFile, Dataset, StateVersion, DepositS
 from src.acp.models.app_model import ResponseDataModel, InboxDatasetDataModel
 # Import custom plugins and classes
 from src.acp.models.assistant_datamodel import RepoAssistantDataModel, Target
-from src.acp.models.bridge_output_model import TargetsCredentialsModel
+from src.acp.models.bridge_output_model import TargetsCredentialsModel, TargetResponse
 from src.acp.jobs.rq_queue import get_deposit_queue
 from src.acp.rq_deposit.enqueue import enqueue_dataset_deposit
 
 # Create an API router instance
 router = APIRouter()
+
+
+def _header_truthy(value: Optional[str]) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 # Helper function to process inbox dataset metadata
@@ -120,6 +126,9 @@ async def process_inbox(status, request):
 
     logging.debug(f'Start inbox for metadata id: {dataset_id} - release version: {dataset_id} - assistant name: '
            f'{idh.assistant_name}')
+    force_requeue = _header_truthy(
+        request.headers.get("force-requeue") or request.headers.get("x-force-requeue")
+    )
 
     if not db_manager.find_dataset_only_by_id(dataset_id):
         logging.debug(f'Dataset does not exist: {dataset_id}')
@@ -189,10 +198,19 @@ async def process_inbox(status, request):
 
     if status != StateVersion.DRAFT and db_manager.is_dataset_ready(dataset.id) and db_manager.are_files_uploaded(dataset.id):
         logging.debug(f'SUBMIT DATASET with version {status.name} is_dataset_ready {dataset.id}')
+        logging.info(
+            "ACP deposit preflight passed: app=%s dataset_id=%s request_status=%s submission_ready=%s files_uploaded=%s",
+            repo_assistant.app_name,
+            dataset.id,
+            status.name,
+            db_manager.is_dataset_ready(dataset.id),
+            db_manager.are_files_uploaded(dataset.id),
+        )
         deposit_job = enqueue_dataset_deposit(
             app_name=repo_assistant.app_name,
             dataset_id=str(dataset.id),
             request_source=f"/inbox/dataset/{idh.status}",
+            force_requeue=force_requeue,
         )
         logging.info(
             "Dataset queued for deposit: %s",
@@ -611,12 +629,15 @@ def run_bridge_deposit(
         dict: Status information about the completed deposit
     """
     logging.info(f"run_bridge_deposit: starting deposit for {dataset_id} (source: {request_source})")
-    follow_bridge(db_manager, app_name, dataset_id)
-    return {
+    bridge_result = follow_bridge(db_manager, app_name, dataset_id)
+    result = {
         "app_name": app_name,
         "dataset_id": dataset_id,
         "status": "completed",
+        "bridge_result": bridge_result,
     }
+    logging.info("run_bridge_deposit: completed deposit for %s with result=%s", dataset_id, result)
+    return result
 
 
 def enqueue_bridge_deposit(
@@ -677,7 +698,7 @@ def bridge_job(db_manager, app_name: str, dataset_id: str, msg: str) -> None:
     )
 
 
-def follow_bridge(db_manager, app_name, dataset_id: str) -> type(None):
+def follow_bridge(db_manager, app_name, dataset_id: str) -> dict[str, Any]:
     """
     Follow the bridge process for a dataset.
 
@@ -688,19 +709,20 @@ def follow_bridge(db_manager, app_name, dataset_id: str) -> type(None):
         dataset_id (str): The ID of the dataset to follow the bridge process for.
 
     Returns:
-        None
+        dict[str, Any]: Summary of target execution results.
     """
     # Log the start time of the thread
     start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     logging.info(f"Follow bridge - Thread for datasetId: {dataset_id} started at {start_time}")
 
     logging.info(f">>> EXECUTE follow_bridge for datasetId: {dataset_id}")
+    logging.info("ACP bridge flow marking dataset as submitted: app=%s dataset_id=%s", app_name, dataset_id)
     db_manager.submitted_now(dataset_id)
     # target_repo_recs = db_manager.find_target_repos_by_dataset_id(dataset_id)
-    execute_bridges(db_manager, app_name, dataset_id)
+    return execute_bridges(db_manager, app_name, dataset_id)
 
 
-def execute_bridges(db_manager, app_name, dataset_id:str) -> None:
+def execute_bridges(db_manager, app_name, dataset_id:str) -> dict[str, Any]:
     """
     Execute the bridge process for a dataset.
 
@@ -716,31 +738,90 @@ def execute_bridges(db_manager, app_name, dataset_id:str) -> None:
     """
     logging.info(f"execute_bridges for datasetId: {dataset_id}")
     results = []
-    targets = db_manager.find_dataset_by_id(dataset_id).target_repos
+    dataset = db_manager.find_dataset_by_id(dataset_id)
+    if dataset is None:
+        raise RuntimeError(f"Dataset {dataset_id!r} not found for bridge execution.")
+
+    targets = dataset.target_repos
+    logging.info("ACP bridge flow loaded %s target(s) for dataset_id=%s", len(targets), dataset_id)
+    if not targets:
+        db_manager.update_dataset_status(dataset_id, StateVersion.FAILED)
+        raise RuntimeError(f"No target repositories configured for dataset_id={dataset_id}.")
 
     for target_repo_rec in targets:
         target_config = Target(**json.loads(target_repo_rec.configuration))
-        bridge_class = data[target_config.bridge_plugin_name]
-        logging.info(f'EXECUTING {bridge_class} for target_repo_id: {target_repo_rec}')
+        bridge_class = data.get(target_config.bridge_plugin_name)
+        if bridge_class is None:
+            db_manager.update_dataset_status(dataset_id, StateVersion.FAILED)
+            raise RuntimeError(
+                f"Bridge plugin {target_config.bridge_plugin_name!r} is not registered for dataset_id={dataset_id}."
+            )
+        logging.info(
+            "ACP bridge flow executing bridge: dataset_id=%s target_repo=%s bridge_plugin=%s bridge_class=%s",
+            dataset_id,
+            target_repo_rec.name,
+            target_config.bridge_plugin_name,
+            bridge_class,
+        )
 
         start = time.perf_counter()
         bridge_instance = get_class(bridge_class)(
             db_manager=db_manager, app_name=app_name, dataset_id=dataset_id, target=target_config
         )
         deposit_result = bridge_instance.job()
+        if deposit_result.response is None:
+            deposit_result.response = TargetResponse()
         deposit_result.response.duration = round(time.perf_counter() - start, 2)
 
-        logging.info(f'Result from Deposit: {deposit_result.model_dump_json()}')
+        logging.info(
+            "ACP bridge flow result: dataset_id=%s target_repo=%s deposit_status=%s duration=%s response_status=%s response_url=%s response_error=%s",
+            dataset_id,
+            target_repo_rec.name,
+            deposit_result.deposit_status,
+            deposit_result.response.duration,
+            deposit_result.response.status_code,
+            deposit_result.response.url,
+            deposit_result.response.error,
+        )
+        if deposit_result.response.content is not None:
+            logging.info(
+                "ACP bridge flow target response: dataset_id=%s target_repo=%s response=%s",
+                dataset_id,
+                target_repo_rec.name,
+                deposit_result.response.content,
+            )
+        logging.debug("ACP bridge flow full result: %s", deposit_result.model_dump_json())
         bridge_instance.save_state(deposit_result)
 
+        target_result = {
+            "target_repo": target_repo_rec.name,
+            "bridge_plugin": target_config.bridge_plugin_name,
+            "deposit_status": deposit_result.deposit_status.value if deposit_result.deposit_status else None,
+            "response_status": deposit_result.response.status_code,
+            "response_url": deposit_result.response.url,
+            "response_error": deposit_result.response.error,
+        }
         if deposit_result.deposit_status in {
             DepositStatus.FINISH, DepositStatus.ACCEPTED, DepositStatus.SUCCESS, DepositStatus.DEPOSITED
         }:
             logging.info(f'Deposit status: {deposit_result.deposit_status} for {dataset_id}')
-            results.append(deposit_result)
+            results.append(target_result)
         else:
+            db_manager.update_dataset_status(dataset_id, StateVersion.FAILED)
+            logging.error(
+                "ACP bridge flow failed: dataset_id=%s target_repo=%s deposit_status=%s response_status=%s response_error=%s",
+                dataset_id,
+                target_repo_rec.name,
+                deposit_result.deposit_status,
+                deposit_result.response.status_code,
+                deposit_result.response.error,
+            )
             send_mail(f'Executing {bridge_class} is FAILED.', f'Resp:\n {deposit_result}')
-            break
+            raise RuntimeError(
+                f"Deposit failed for dataset_id={dataset_id} target_repo={target_repo_rec.name} "
+                f"status={deposit_result.deposit_status} response_status={deposit_result.response.status_code} "
+                f"response_error={deposit_result.response.error}"
+            )
 
     if len(results) == len(targets):
         logging.info(f'All targets successfully executed for datasetId: {dataset_id}. Deleting dataset folder...')
@@ -755,9 +836,18 @@ def execute_bridges(db_manager, app_name, dataset_id:str) -> None:
             logging.info(f'All related files deleted successfully: {dataset_folder}')
         # Update dataset status to SUBMITTED
         db_manager.update_dataset_status(dataset_id, StateVersion.SUBMITTED)
+        summary = {
+            "dataset_id": dataset_id,
+            "app_name": app_name,
+            "status": "submitted",
+            "targets": results,
+        }
+        logging.info("ACP bridge flow completed successfully: %s", summary)
+        return summary
     else:
+        db_manager.update_dataset_status(dataset_id, StateVersion.FAILED)
         logging.error(f'Ingest failed for datasetId: {dataset_id}')
-        # db_manager.update_dataset_status(dataset_id, StateVersion.FAILED)
+        raise RuntimeError(f"Ingest failed for datasetId: {dataset_id}")
 
 
 #
