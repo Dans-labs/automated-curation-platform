@@ -72,10 +72,11 @@ class ZenodoApiDepositor(Bridge):
             hdr["Authorization"] = f"Bearer {token}"
         return hdr
 
-    @staticmethod
-    def _log_zenodo_response(action: str, response: requests.Response) -> None:
-        ZenodoApiDepositor._log_target_info(
-            "Zenodo %s response: status_code=%s url=%s body=%s",
+    def _log_zenodo_response(self, action: str, response: requests.Response) -> None:
+        self._log_target_info(
+            "Zenodo response: dataset_id=%s target_repo=%s action=%s status_code=%s url=%s body=%s",
+            self.dataset_id,
+            self.target.repo_name,
             action,
             response.status_code,
             response.url,
