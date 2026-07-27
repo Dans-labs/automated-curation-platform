@@ -139,6 +139,20 @@ async def process_inbox(status, request):
         logging.info(f'Dataset already exist: {dataset_id}')
         dataset = db_manager.find_dataset_only_by_id(dataset_id)#TODO: Check if resubmit and the dataset is not found: error!
         print(json.dumps(json.loads(dataset.metadata_content), indent=4))
+        if (
+            status == StateVersion.SUBMIT
+            and dataset.status == StateVersion.SUBMITTED
+            and not force_requeue
+        ):
+            logging.info(
+                "Skipping duplicate submit for already-submitted dataset: app=%s dataset_id=%s",
+                repo_assistant.app_name,
+                dataset_id,
+            )
+            rdm = ResponseDataModel(status="OK")
+            rdm.dataset_id = str(dataset.id)
+            rdm.start_process = False
+            return rdm
 
     dataset_submission_ready = status in [StateVersion.SUBMIT, StateVersion.RESUBMIT]
     dataset_status = status if status in [StateVersion.DRAFT_RESUBMIT, StateVersion.SUBMIT, StateVersion.RESUBMIT] else dataset.status
