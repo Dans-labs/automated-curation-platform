@@ -2,6 +2,7 @@ import base64
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from enum import StrEnum, auto, Enum
 from typing import Any, List, Optional
@@ -23,6 +24,12 @@ from sqlalchemy.orm import selectinload
 from sqlmodel import JSON
 
 from src.acp.models.app_model import Asset, TargetApp
+
+
+def _normalize_database_name(app_name: str) -> str:
+    sanitized = re.sub(r"[^A-Za-z0-9_]", "_", app_name.strip())
+    sanitized = re.sub(r"_+", "_", sanitized).strip("_")
+    return f"acp_{sanitized}" if sanitized else "acp"
 
 def get_acp_version() -> str:
     return os.environ.get("acp_version", "unknown")  # Replace with the actual logic to retrieve the version if needed
@@ -201,7 +208,7 @@ class DatabaseManager:
     def __init__(self, db_dialect: str, db_url: str, encryption_key: str, app_name: str = ""):
         self.db_dialect = db_dialect
         self.app_name = app_name
-        db_name = f"acp_{app_name}" if app_name.strip() else "acp"
+        db_name = _normalize_database_name(app_name)
         if db_dialect == "sqlite":
             if db_url == ":memory:":
                 self.conn_url = f'{db_dialect}:///{db_url}'
