@@ -5,8 +5,14 @@ log_level = 10
 otlp_enable = true
 #db_dialect="sqlite"
 db_dialect="postgresql+psycopg2"
+# Preferred: provide DB_USER/DB_PASSWORD/DB_HOST/DB_PORT via env or .env.
+# DB_URL remains a fallback for older setups.
+db_user = ""
+db_password = ""
+db_host = ""
+db_port = ""
+db_url = ""
 #db_url = "@format ///{env[BASE_DIR]}/data/db"
-db_url = "acp:1012akmi2004@localhost:5432"
 data_db_file = "sqlite:{@format {env[BASE_DIR]}/data/db/acp.db}"
 data_tmp_base_dir = "@format {env[BASE_DIR]}/data/tmp"
 data_tmp_base_tus_files_dir = "@format {env[BASE_DIR]}/data/tmp/tus-files"

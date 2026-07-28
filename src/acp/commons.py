@@ -40,7 +40,30 @@ data = {}
 project_details = a_commons.get_project_details(os.getenv("BASE_DIR"), ['name', 'version', 'description', 'title'])
 
 db_dialect = os.getenv("DB_DIALECT", app_settings.DB_DIALECT)
-db_url = os.getenv("DB_URL", app_settings.DB_URL)
+
+
+def _build_db_url() -> str:
+    env_db_url = os.getenv("DB_URL")
+    if env_db_url:
+        return env_db_url
+
+    db_user = os.getenv("DB_USER") or getattr(app_settings, "DB_USER", "")
+    db_password = os.getenv("DB_PASSWORD") or getattr(app_settings, "DB_PASSWORD", "")
+    db_host = os.getenv("DB_HOST") or getattr(app_settings, "DB_HOST", "")
+    db_port = os.getenv("DB_PORT") or getattr(app_settings, "DB_PORT", "")
+    if all([db_user, db_password, db_host, db_port]):
+        return f"{db_user}:{db_password}@{db_host}:{db_port}"
+
+    db_url = getattr(app_settings, "DB_URL", "")
+    if db_url:
+        return db_url
+
+    raise RuntimeError(
+        "ACP database configuration is missing. Set DB_URL or DB_USER/DB_PASSWORD/DB_HOST/DB_PORT."
+    )
+
+
+db_url = _build_db_url()
 encryption_key = os.getenv("DB_ENCRYPTION_KEY", app_settings.DB_ENCRYPTION_KEY)
 
 def get_db_manager(app_name: str):
