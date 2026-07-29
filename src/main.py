@@ -152,6 +152,21 @@ log_config = uvicorn.config.LOGGING_CONFIG
 logging.basicConfig(filename=app_settings.LOG_FILE, level=app_settings.LOG_LEVEL,
                         format=app_settings.LOG_FORMAT)
 
+
+class _SuppressNoisyAccessLogs(logging.Filter):
+    """Drop high-frequency, low-value access log lines (health checks, missing /metrics)."""
+    _SUPPRESS = [
+        '"GET /metrics HTTP/1.1" 404',
+        '"GET / HTTP/1.1" 200',
+    ]
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return not any(pattern in msg for pattern in self._SUPPRESS)
+
+
+logging.getLogger("uvicorn.access").addFilter(_SuppressNoisyAccessLogs())
+
 if app_settings.otlp_enable is False:
     logging.info("Logging configured without OTLP")
 else:
