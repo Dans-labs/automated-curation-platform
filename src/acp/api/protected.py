@@ -7,6 +7,7 @@ import mimetypes
 import os
 import shutil
 import time
+import urllib.parse
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -38,6 +39,24 @@ def _header_truthy(value: Optional[str]) -> bool:
     if value is None:
         return False
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _normalize_oai_base_url(base_url: str | None) -> str | None:
+    if not base_url:
+        return None
+    parsed = urllib.parse.urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return base_url
+
+    path = parsed.path.rstrip("/")
+    if path.lower().endswith("/oai"):
+        normalized_path = path
+    elif not path:
+        normalized_path = "/oai"
+    else:
+        normalized_path = f"{path}/oai"
+
+    return parsed._replace(path=normalized_path, query="", fragment="").geturl()
 
 
 # Helper function to process inbox dataset metadata
@@ -454,11 +473,20 @@ def process_target_repos(repo_assistant, target_creds) -> [TargetRepo]:
     db_recs_target_repo = []
     tgc = {"targets-credentials": json.loads(target_creds)}
     input_target_cred_model = TargetsCredentialsModel.model_validate(tgc)
+    source_base_url = None
+    if repo_assistant.source and repo_assistant.source.base_url:
+        source_base_url = (
+            _normalize_oai_base_url(repo_assistant.source.base_url)
+            if (repo_assistant.source.plugin or "").lower() == "oai-pmh"
+            else repo_assistant.source.base_url
+        )
+
     for repo_target in repo_assistant.targets:
         if repo_target.bridge_plugin_name not in data.keys():
             msg = f'Module "{repo_target.bridge_plugin_name}" not found.'
             logging.error(msg)
             raise HTTPException(status_code=404, detail=msg, headers={})
+        repo_target.source_base_url = source_base_url
         target_repo_name = repo_target.repo_name
         logging.info(f'target_repo_name: {target_repo_name}')
         for depositor_cred in input_target_cred_model.targets_credentials:
