@@ -57,6 +57,32 @@ class RetrieveDataverseJson(Bridge):
             return f"doi:{value}"
         raise ValueError(f"Could not convert DOI value to persistent ID: {doi_value}")
 
+    @staticmethod
+    def _normalize_oai_base_url(base_url: str) -> str:
+        parsed = urllib.parse.urlparse(base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError(f"Invalid source base URL: {base_url}")
+
+        path = parsed.path.rstrip("/")
+        if path.lower().endswith("/oai"):
+            normalized_path = path
+        elif not path:
+            normalized_path = "/oai"
+        else:
+            normalized_path = f"{path}/oai"
+
+        return parsed._replace(path=normalized_path, query="", fragment="").geturl()
+
+    @classmethod
+    def _derive_export_endpoint_from_source_base_url(cls, source_base_url: str) -> str:
+        normalized_oai_url = cls._normalize_oai_base_url(source_base_url)
+        parsed = urllib.parse.urlparse(normalized_oai_url)
+        source_path = parsed.path.rstrip("/")
+        root_path = source_path[:-4] if source_path.lower().endswith("/oai") else source_path
+        root_path = root_path.rstrip("/")
+        export_path = f"{root_path}/api/datasets/export" if root_path else "/api/datasets/export"
+        return parsed._replace(path=export_path, query="", fragment="").geturl()
+
     def _extract_doi_value(self, metadata_content: str, raw_xml: str | None) -> str:
         metadata_obj = json.loads(metadata_content)
 
@@ -103,10 +129,14 @@ class RetrieveDataverseJson(Bridge):
         doi_value = self._extract_doi_value(metadata_content, raw_xml)
         persistent_id = self._to_persistent_id(doi_value)
 
-        export_endpoint = os.getenv(
-            "DATAVERSE_JSON_EXPORT_ENDPOINT",
-            "https://dataverse.nl/api/datasets/export",
-        )
+        source_base_url = self.target.source_base_url
+        if source_base_url:
+            export_endpoint = self._derive_export_endpoint_from_source_base_url(source_base_url)
+        else:
+            export_endpoint = os.getenv(
+                "DATAVERSE_JSON_EXPORT_ENDPOINT",
+                "https://dataverse.nl/api/datasets/export",
+            )
         query = urllib.parse.urlencode(
             {
                 "exporter": "dataverse_json",
