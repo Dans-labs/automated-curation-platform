@@ -67,6 +67,12 @@ class StorageType(StrEnum):
     S3 = 's3'
 
 
+class Source(BaseModel):
+    plugin: Optional[str] = None
+    base_url: Optional[str] = Field(default=None, alias='base_url')
+    metadata_prefix: Optional[str] = Field(default=None, alias='metadata_prefix')
+
+
 class Target(BaseModel):
     """
     Represents a target in the repository assistant application.
@@ -98,6 +104,7 @@ class Target(BaseModel):
     storage_type: Optional[StorageType] = Field(default=StorageType.FILE_SYSTEM, alias='storage-type')
     initial_release_version: Optional[str] = Field(default=None, alias='initial-release-version')
     input: Optional[Input] = None
+    source_base_url: Optional[str] = Field(default=None, alias='source-base-url')
 
     @field_validator('target_url', 'base_url', mode='before')
     def validate_urls(cls, v, field):
@@ -181,6 +188,7 @@ class RepoAssistantDataModel(BaseModel):
     description: Optional[str] = None
     app_name: str = Field(..., alias='app-name')
     app_config_url: Optional[str] = Field(None, alias='app-config-url')
+    source: Optional[Source] = None
     targets: List[Target]
     file_conversions: Optional[List[FileConversion]] = Field(None, alias='file-conversions')
     enrichments: Optional[List[Enrichment]] = None
