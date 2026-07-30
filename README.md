@@ -210,7 +210,7 @@ In this demo, we will showcase how the Automated Curation Platform (ACP) can ing
      PYTHONPATH=/Users/akmi/dev/work/dans/orchestrator-acp-poc/services/acp/src;
      EXPOSE_PORT=10124;
      DB_DIALECT=postgresql+psycopg2;
-     DB_URL=acp:1012akmi2004@localhost:5432;
+     DB_URL=acp:HelloAkmi@localhost:5432;
      ASSISTANT_CONFIG_URL=http://localhost:2810;
      TRANSFORMER_URL=http://localhost:1745/transform;
      OTLP_GRPC_ENDPOINT=http://localhost:4317
