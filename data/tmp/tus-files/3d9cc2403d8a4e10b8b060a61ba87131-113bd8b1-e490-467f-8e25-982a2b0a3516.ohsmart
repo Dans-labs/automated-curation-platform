@@ -1,0 +1,156 @@
+{
+  "access": {
+    "embargo": {
+      "active": false,
+      "reason": null
+    },
+    "files": "public",
+    "record": "public",
+    "status": "metadata-only"
+  },
+  "created": "2026-05-07T23:25:58.853064+00:00",
+  "custom_fields": {},
+  "deletion_status": {
+    "is_deleted": false,
+    "status": "P"
+  },
+  "files": {
+    "count": 0,
+    "enabled": false,
+    "entries": {},
+    "order": [],
+    "total_bytes": 0
+  },
+  "id": "9eh9w-6a954",
+  "internal_notes": [],
+  "is_draft": false,
+  "is_published": true,
+  "links": {
+    "access": "https://tdr.osc-indonesia.id/api/records/9eh9w-6a954/access",
+    "access_grants": "https://tdr.osc-indonesia.id/api/records/9eh9w-6a954/access/grants",
+    "access_groups": "https://tdr.osc-indonesia.id/api/records/9eh9w-6a954/access/groups",
+    "access_links": "https://tdr.osc-indonesia.id/api/records/9eh9w-6a954/access/links",
+    "access_request": "https://tdr.osc-indonesia.id/api/records/9eh9w-6a954/access/request",
+    "access_users": "https://tdr.osc-indonesia.id/api/records/9eh9w-6a954/access/users",
+    "archive": "https://tdr.osc-indonesia.id/api/records/9eh9w-6a954/files-archive",
+    "archive_media": "https://tdr.osc-indonesia.id/api/records/9eh9w-6a954/media-files-archive",
+    "communities": "https://tdr.osc-indonesia.id/api/records/9eh9w-6a954/communities",
+    "communities-suggestions": "https://tdr.osc-indonesia.id/api/records/9eh9w-6a954/communities-suggestions",
+    "doi": "https://handle.test.datacite.org/urn:nbn:id:vip:elite-rpzedddmh-123",
+    "draft": "https://tdr.osc-indonesia.id/api/records/9eh9w-6a954/draft",
+    "files": "https://tdr.osc-indonesia.id/api/records/9eh9w-6a954/files",
+    "latest": "https://tdr.osc-indonesia.id/api/records/9eh9w-6a954/versions/latest",
+    "latest_html": "https://tdr.osc-indonesia.id/records/9eh9w-6a954/latest",
+    "media_files": "https://tdr.osc-indonesia.id/api/records/9eh9w-6a954/media-files",
+    "parent": "https://tdr.osc-indonesia.id/api/records/e8n5x-a3c08",
+    "parent_html": "https://tdr.osc-indonesia.id/records/e8n5x-a3c08",
+    "preview_html": "https://tdr.osc-indonesia.id/records/9eh9w-6a954?preview=1",
+    "requests": "https://tdr.osc-indonesia.id/api/records/9eh9w-6a954/requests",
+    "reserve_doi": "https://tdr.osc-indonesia.id/api/records/9eh9w-6a954/draft/pids/doi",
+    "self": "https://tdr.osc-indonesia.id/api/records/9eh9w-6a954",
+    "self_doi": "https://handle.test.datacite.org/urn:nbn:id:vip:elite-rpzedddmh-123",
+    "self_doi_html": "https://tdr.osc-indonesia.id/doi/urn:nbn:id:vip:elite-rpzedddmh-123",
+    "self_html": "https://tdr.osc-indonesia.id/records/9eh9w-6a954",
+    "self_iiif_manifest": "https://tdr.osc-indonesia.id/api/iiif/record:9eh9w-6a954/manifest",
+    "self_iiif_sequence": "https://tdr.osc-indonesia.id/api/iiif/record:9eh9w-6a954/sequence/default",
+    "versions": "https://tdr.osc-indonesia.id/api/records/9eh9w-6a954/versions"
+  },
+  "media_files": {
+    "count": 0,
+    "enabled": false,
+    "entries": {},
+    "order": [],
+    "total_bytes": 0
+  },
+  "metadata": {
+    "creators": [
+      {
+        "person_or_org": {
+          "family_name": "Abu 'Abd Allah Khalid ibn 'Abd Allah al-Azhari al-Misri (penulis)",
+          "name": "Abu 'Abd Allah Khalid ibn 'Abd Allah al-Azhari al-Misri (penulis)",
+          "type": "personal"
+        }
+      }
+    ],
+    "description": "<p>ag</p>",
+    "publication_date": "2026-05-07",
+    "resource_type": {
+      "id": "publication-preprint",
+      "title": {
+        "de": "Preprint",
+        "en": "Preprint",
+        "sv": "Preprint"
+      }
+    },
+    "rights": [
+      {
+        "description": {
+          "en": "The Creative Commons Attribution license allows re-distribution and re-use of a licensed work on the condition that the creator is appropriately credited."
+        },
+        "icon": "cc-by-icon",
+        "id": "cc-by-4.0",
+        "props": {
+          "scheme": "spdx",
+          "url": "https://creativecommons.org/licenses/by/4.0/"
+        },
+        "title": {
+          "en": "Creative Commons Attribution 4.0 International"
+        }
+      }
+    ],
+    "title": "abc"
+  },
+  "parent": {
+    "access": {
+      "grants": [],
+      "links": [],
+      "owned_by": {
+        "user": "1"
+      },
+      "settings": {
+        "accept_conditions_text": null,
+        "allow_guest_requests": false,
+        "allow_user_requests": false,
+        "secret_link_expiration": 0
+      }
+    },
+    "communities": {},
+    "id": "e8n5x-a3c08",
+    "is_verified": false,
+    "pids": {}
+  },
+  "pids": {
+    "doi": {
+      "identifier": "urn:nbn:id:vip:elite-rpzedddmh-123",
+      "provider": "external"
+    },
+    "oai": {
+      "identifier": "oai:invenio-rdm:9eh9w-6a954",
+      "provider": "oai"
+    }
+  },
+  "revision_id": 3,
+  "stats": {
+    "all_versions": {
+      "data_volume": 0.0,
+      "downloads": 0,
+      "unique_downloads": 0,
+      "unique_views": 0,
+      "views": 0
+    },
+    "this_version": {
+      "data_volume": 0.0,
+      "downloads": 0,
+      "unique_downloads": 0,
+      "unique_views": 0,
+      "views": 0
+    }
+  },
+  "status": "published",
+  "updated": "2026-05-07T23:25:58.931599+00:00",
+  "versions": {
+    "index": 1,
+    "is_latest": true,
+    "is_latest_draft": true
+  }
+}
