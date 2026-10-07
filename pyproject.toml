@@ -21,6 +21,7 @@ dependencies = [
     "jsonpatch>=1.33",
     "psutil>=7.0.0",
     "pydantic>=2.10.6",
+    "pypdf>=6.19.0",
     "python-keycloak>=5.3.1",
     "python-multipart>=0.0.20",
     "oaipmh-scythe>=0.13,<1",

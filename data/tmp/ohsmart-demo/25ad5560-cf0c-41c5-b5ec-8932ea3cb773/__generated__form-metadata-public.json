@@ -1,0 +1,309 @@
+
+       
+        {
+        "id": "25ad5560-cf0c-41c5-b5ec-8932ea3cb773",
+        "metadata": {
+        
+                    "interviewee": 
+                    
+                        {
+                        
+                                    "interviewee_first_name": "Aliquid tempora aliq"
+                                ,
+                                    "interviewee_last_name": "Eum qui fugiat illu"
+                                
+                        } ,
+                    
+                    "interviewer": [
+                    
+                        {
+                        
+                                                "interviewer_first_name": "Laborum est est labo"
+                                                ,
+                                                "interviewer_last_name": "At fuga Ea odio rep"
+                                                
+                        } ],
+                    "interpreter": [
+                    
+                        {
+                        
+                                                "interpreter_first_name": "Quia in sit quia vol"
+                                                ,
+                                                "interpreter_last_name": "Irure ea a cillum ob"
+                                                
+                        } ],
+                    "others": [
+                    
+                        {
+                        
+                        } ,
+                        {
+                        
+                                                "others_first_name": "Henk"
+                                                ,
+                                                "others_last_name": "de Tenk"
+                                                
+                        } ],
+                     "interview_location": [
+                    
+                        
+                        {
+                        "label": "Khoraxa-ams, Namibia",
+                        "value": "https://www.geonames.org/3356214",
+                        "coordinates": [
+                        "13.9582","-19.52371"
+                      ]
+                            
+                        } ],
+                   "interview_date_time": [
+                        
+                        {
+                            
+                                        "interview_date_time_range": "12-12-2022 12-12-2022"
+                                    
+                        } ],
+                   "recorded_by": [
+                        
+                        {
+                            
+                                        "recorded_by_first_name": "In necessitatibus mi"
+                                    ,
+                                        "recorded_by_last_name": "Eos tempor blanditi"
+                                    ,
+                                        "recorded_by_affiliation": "Laborum Tempor inci"
+                                    ,
+                                        "recorded_by_consent": "recorded_by_consent_signed"
+                                    
+                        } ],
+                    "recording_format": [
+                    
+                    "recording_equipment":"Quin Sheppard", 
+                
+                    "transcript_machine":"Dolorem qui aut eos", 
+                
+                    "title":"Interview met Aliquid tempora aliq Eum qui fugiat illu, Khoraxa-ams, Namibia, 12-12-2022", 
+                
+                    "subtitle":"Modi ullamco volupta", 
+                
+                    "description":"Quidem aut doloribus", 
+                
+                    "publisher": {
+                    
+                        "label": "Korean National Police University"
+                        ,
+                        "value": "https://ror.org/02s89kd69"
+                        ,
+                        "extraLabel": "country"
+                        ,
+                        "extraContent": "South Korea"
+                        
+                    } ,
+                
+                    "author": [
+                    {
+                        
+                            "name":
+                            {
+                            
+                                "label":"Daan van Yperen"
+                                ,
+                                "value":"https://orcid.org/0000-0002-9375-2994"
+                                ,
+                                "extraLabel":"institutions"
+                                ,
+                                "idLabel":"ORCID ID"
+                                ,
+                                "id":"0000-0002-9375-2994"
+                                },
+                            "affiliation":
+                            
+                            "Temporibus voluptate"
+                            
+                        } ,{
+                        
+                            "name":
+                            {
+                            
+                                "label":"You FANG"
+                                ,
+                                "value":"https://orcid.org/0000-0001-8137-0887"
+                                ,
+                                "extraLabel":"institutions"
+                                ,
+                                "extraContent":""
+                                ,
+                                "idLabel":"ORCID ID"
+                                ,
+                                "id":"0000-0001-8137-0887"
+                                },
+                            "affiliation":
+                            
+                            "baba"
+                            
+                        } ],
+                   "grant": [
+                        
+                        {
+                            
+                                        "grant_agency": "Ab modi qui in adipi"
+                                    ,
+                                        "grant_number": "Blanditiis ipsum il"
+                                    
+                        } ],
+                    "subject_keywords_aat": [
+                    
+                        
+                        {
+                        "label": "oral history (discipline)",
+                        "value": "http://vocab.getty.edu/aat/300054402"
+                        
+                        
+                        
+                        } ],
+                    "subject_keywords_wikidata": [
+                    
+                        
+                        {
+                        "label": "Bahia",
+                        "value": "http://www.wikidata.org/entity/Q40430"
+                        
+                        
+                        
+                        } ,
+                        
+                        {
+                        "label": "Bachelor of Arts",
+                        "value": "http://www.wikidata.org/entity/Q1765120"
+                        
+                        
+                        
+                        } ,
+                        
+                        {
+                        "label": "bachelor's degree",
+                        "value": "http://www.wikidata.org/entity/Q163727"
+                        
+                        
+                        
+                        } ],
+                    "subject_keywords_freetext": [
+                    
+                        
+                        {
+                        "label": "",
+                        "value": ""
+                        
+                        
+                        
+                        } ],
+                     "subject_location": [
+                    
+                        
+                        {
+                        "label": "Europe",
+                        "value": "https://www.geonames.org/6255148",
+                        "coordinates": [
+                        "9.14062","48.69096"
+                      ]
+                            
+                        } ],
+                   "subject_date_time": [
+                        
+                        {
+                            
+                                        "subject_date_time_range": "1212 1230"
+                                    
+                        } ],
+                    "audience": [
+                    
+                        
+                        {
+                        "label": "Aardwetenschappen",
+                        "value": "https://www.narcis.nl/classification/D15000"
+                        
+                        
+                        
+                        } ,
+                        
+                        {
+                        "label": "Fourieranalyse, functionaalanalyse",
+                        "value": "https://www.narcis.nl/classification/D11400"
+                        
+                        
+                        
+                        } ],
+                    "collections": [
+                    
+                        
+                        {
+                        "label": "Oral History",
+                        "value": "https://vocabularies.dans.knaw.nl/collections/ssh/cfa04ed6-4cd0-4651-80cb-ed4ca8fa14f3"
+                        
+                        
+                        
+                        } ],
+                   "relation": [
+                        
+                        {
+                            
+                                        "relation_type": "has part"
+                                    ,
+                                        "relation_item": "f"
+                                    ,
+                                        "relation_reference": "http://google.com"
+                                    
+                        } ,
+                        {
+                            
+                                        "relation_type": "is required by"
+                                    ,
+                                        "relation_item": "fdasfda"
+                                    ,
+                                        "relation_reference": "http://henkie.nl"
+                                    
+                        } ],
+                    "language_interview": [
+                    
+                        
+                        {
+                        "label": "Afrikaans",
+                        "value": "af"
+                        
+                        
+                        
+                        } ],
+                    "language_metadata": {
+                    
+                        "label": "Assamese"
+                        ,
+                        "value": "as"
+                        
+                    } ,
+                
+                    "contact_email":"daan.janssen@dans.knaw.nl", 
+                
+                    "rightsholder": {
+                    
+                        "label": "Ontario Confederation of University Faculty Associations"
+                        ,
+                        "value": "https://ror.org/048cnkq84"
+                        ,
+                        "extraLabel": "country"
+                        ,
+                        "extraContent": "Canada"
+                        
+                    } ,
+                
+                    "licence_type": {
+                    
+                        "label": "DANS Licence"
+                        ,
+                        "value": "https://doi.org/10.17026/fp39-0x58"
+                        
+                    } ,
+                
+                    "personal_data":"personal_data_true", 
+                "file-metadata": [ ] } 
+        }
+       
+    

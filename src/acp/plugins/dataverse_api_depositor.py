@@ -6,6 +6,7 @@ import subprocess
 import time
 import uuid
 from datetime import datetime, timezone
+from pypdf import PdfWriter
 
 import jmespath
 import requests
@@ -69,7 +70,12 @@ class DataverseIngester(Bridge):
                     # Add generated files to the metadata
                     generated_files, files_metadata = self.__create_generated_files(files_metadata)
                     for gf in generated_files:
-                        files_metadata.append({"name": gf.name, "mimetype": gf.mime_type, "private": gf.access_level == AccessLevel.PRIVATE, "size": gf.size, "state": "generated"})
+                        entry = {"name": gf.name, "mimetype": gf.mime_type,
+                                "private": gf.access_level == AccessLevel.PRIVATE,
+                                "size": gf.size, "state": "generated"}
+                        if gf.name in self.merged_embargoes:
+                            entry["embargo"] = self.merged_embargoes[gf.name]
+                        files_metadata.append(entry)
                     if generated_files:
                         self.db_manager.insert_datafiles(self.dataset_id, generated_files)
 
@@ -232,19 +238,22 @@ class DataverseIngester(Bridge):
 
     def __create_generated_files(self, files_metadata) -> [DataFile]:
         generated_files = []
+        self.merged_embargoes = {}
         # Remove the existing generated files
         self.db_manager.delete_generated_files(self.dataset_id)
+        # Snapshot the form's file list: the loop below reassigns files_metadata
+        uploads = list(files_metadata)
+
         for tm in self.target.metadata.transformed_metadata:
             if tm.generate_file:
                 gf_path = os.path.join(self.dataset_dir, tm.name)
                 url = f'{tm.transformer_url}?app_name={self.app_name}' if tm.transformer_url else None
+                is_pdf = tm.name.lower().endswith(".pdf")
 
-                if url and tm.name.lower().endswith(".pdf"):
-                    # Binary output (PDF): write the raw bytes
+                if url and is_pdf:
                     with open(gf_path, "wb") as f:
                         f.write(transform_to_bytes(url, self.dataset_rec.metadata_content))
                 else:
-                    # Text output: same behaviour as before
                     content = transform(url, self.dataset_rec.metadata_content) if url else self.dataset_rec.metadata_content
                     with open(gf_path, "wt") as f:
                         f.write(content)
@@ -258,10 +267,58 @@ class DataverseIngester(Bridge):
                     added_at=datetime.now(timezone.utc), access_level=access_levels,
                     state=DataFileState.GENERATED))
 
+                if tm.merge_uploads and is_pdf:
+                    generated_files.extend(self.__merge_uploads(tm, gf_path, uploads))
+
                 name_to_remove = tm.name
                 files_metadata = [file for file in files_metadata if file.get("name") != name_to_remove]
 
         return generated_files, files_metadata
+
+
+    def __merge_uploads(self, tm, base_pdf_path, uploads) -> [DataFile]:
+        """One merged PDF per upload flagged merge=true: generated pages first, then the upload."""
+        merged = []
+        for fm in uploads:
+            if fm.get("merge") is not True:
+                continue
+            upload_name = fm.get("name", "")
+            rec = self.db_manager.find_file_by_name(self.dataset_id, upload_name)
+            if not upload_name.lower().endswith(".pdf") or not rec or rec.mime_type != "application/pdf":
+                logging.warning(f'merge=true on "{upload_name}", but it is not an uploaded PDF. Skipping.')
+                continue
+            if not os.path.exists(rec.path):   # e.g. already ingested and deleted on an earlier submit
+                logging.warning(f'Upload "{upload_name}" is no longer on disk. Skipping merge.')
+                continue
+
+            stem = f'{os.path.splitext(tm.name)[0]} - {os.path.splitext(upload_name)[0]}'
+            name = re.sub(r'[\\/:*?"<>|;#]', '_', stem) + ".pdf"
+            out_path = os.path.join(self.dataset_dir, name)
+            try:
+                writer = PdfWriter()
+                writer.append(base_pdf_path)   # generated pages first
+                writer.append(rec.path)        # then the upload
+                with open(out_path, "wb") as f:
+                    writer.write(f)
+                writer.close()
+            except Exception as e:             # corrupt or encrypted PDF
+                logging.warning(f'Could not merge "{upload_name}": {e}. Skipping.')
+                if os.path.exists(out_path):
+                    os.remove(out_path)
+                continue
+
+            # The merged file contains the upload, so it must be at least as restricted as it
+            restricted = bool(tm.restricted) or bool(fm.get("private"))
+            if fm.get("embargo"):
+                self.merged_embargoes[name] = fm["embargo"]
+            merged.append(DataFile(
+                dataset_id=self.dataset_id, name=name, path=out_path,
+                size=os.path.getsize(out_path), mime_type="application/pdf",
+                checksum=get_checksum(out_path, algorithm="MD5"),
+                added_at=datetime.now(timezone.utc),
+                access_level=AccessLevel.PRIVATE if restricted else AccessLevel.PUBLIC,
+                state=DataFileState.GENERATED))
+        return merged
 
     def __reingest_files(self, pid: str, str_updated_metadata_json: str, headers) -> int:
         logging.info(f'Ingesting files to {pid}')

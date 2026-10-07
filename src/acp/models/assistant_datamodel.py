@@ -16,12 +16,14 @@ class TransformedMetadata(BaseModel):
     - name (str): The name of the transformed result.
     - dir (str): The directory for the transformed result.
     - restricted (Optional[bool]): Indicates if the resource is restricted.
+    - merge_uploads (Optional[bool]): Indicates if uploads should be merged.
     """
     transformer_url: Optional[str] = Field(None, alias='transformer-url')
     name: str
     dir: Optional[str] = None
     generate_file: Optional[bool] = Field(None, alias='generate-file')
     restricted: Optional[bool] = None
+    merge_uploads: Optional[bool] = Field(None, alias='merge-uploads')
 
 
 class ProcessedMetadata(BaseModel):
