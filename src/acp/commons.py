@@ -790,3 +790,26 @@ def validate_json(str_dv_metadata):
             logging.error(f"Retry failed: {e}")
             return None
     return str_dv_metadata
+
+def transform_to_bytes(transformer_url: str, str_tobe_transformed: str, headers: dict = None) -> bytes:
+    """
+    Transforms the given string using the specified transformer URL and returns the result as bytes.
+
+    Args:
+        transformer_url (str): The URL of the transformer service.
+        str_tobe_transformed (str): The string to be transformed.
+        headers (dict, optional): Optional headers to include in the request. Defaults to None.
+
+    Returns:
+        bytes: The transformed content as bytes.
+
+    Raises:
+        ValueError: If the transformer response status code is not 200.
+    """
+    headers = headers or transformer_headers
+    response = requests.post(transformer_url, headers=headers,
+                             data=str_tobe_transformed.encode("utf-8"))
+    if response.status_code != 200:
+        logging.error(f'transformer_response: {response.status_code} {response.text[:500]}')
+        raise ValueError(f"Error - Transformer response status code: {response.status_code}")
+    return response.content

@@ -17,7 +17,7 @@ from src.acp.commons import (
     app_settings,
     transform,
     handle_deposit_exceptions, dmz_dataverse_headers, zip_a_zipfile_with_progress, transform_xml,
-    processed_metadata_handler, validate_json, delete_symlink_and_target
+    processed_metadata_handler, validate_json, delete_symlink_and_target, transform_to_bytes
 )
 from src.acp.db.dbz import StateVersion, DataFile, DepositStatus, MetadataType, AccessLevel, DataFileState, \
     IngestFileStatus
@@ -237,10 +237,18 @@ class DataverseIngester(Bridge):
         for tm in self.target.metadata.transformed_metadata:
             if tm.generate_file:
                 gf_path = os.path.join(self.dataset_dir, tm.name)
-                content = transform(f'{tm.transformer_url}?app_name={self.app_name}',
-                                    self.dataset_rec.metadata_content) if tm.transformer_url else self.dataset_rec.metadata_content
-                with open(gf_path, "wt") as f:
-                    f.write(content)
+                url = f'{tm.transformer_url}?app_name={self.app_name}' if tm.transformer_url else None
+
+                if url and tm.name.lower().endswith(".pdf"):
+                    # Binary output (PDF): write the raw bytes
+                    with open(gf_path, "wb") as f:
+                        f.write(transform_to_bytes(url, self.dataset_rec.metadata_content))
+                else:
+                    # Text output: same behaviour as before
+                    content = transform(url, self.dataset_rec.metadata_content) if url else self.dataset_rec.metadata_content
+                    with open(gf_path, "wt") as f:
+                        f.write(content)
+
                 gf_mimetype = mimetypes.guess_type(gf_path)[0]
                 access_levels = AccessLevel.PRIVATE if tm.restricted else AccessLevel.PUBLIC
                 generated_files.append(DataFile(
