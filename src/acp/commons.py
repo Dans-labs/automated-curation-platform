@@ -224,6 +224,7 @@ def handle_deposit_exceptions(
             rv = func(*args, **kwargs)
             return rv
         except Exception as ex:
+            logging.exception("Deposit job failed")
             logging.error(f'Errors in {func.__name__}: {ex} - {ex.with_traceback(ex.__traceback__)}')
             target = args[0].target
             bom = TargetDataModel()

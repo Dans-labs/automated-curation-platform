@@ -7,7 +7,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pypdf import PdfWriter
-
+import re
 import jmespath
 import requests
 from simple_file_checksum import get_checksum
@@ -68,13 +68,13 @@ class DataverseIngester(Bridge):
                 if self.target.metadata.transformed_metadata:
                     # When transformed metadata is available, transform the metadata
                     # Add generated files to the metadata
-                    generated_files, files_metadata = self.__create_generated_files(files_metadata)
+                    generated_files, files_metadata, merged_embargoes = self.__create_generated_files(files_metadata)
                     for gf in generated_files:
                         entry = {"name": gf.name, "mimetype": gf.mime_type,
                                 "private": gf.access_level == AccessLevel.PRIVATE,
                                 "size": gf.size, "state": "generated"}
-                        if gf.name in self.merged_embargoes:
-                            entry["embargo"] = self.merged_embargoes[gf.name]
+                        if gf.name in merged_embargoes:
+                            entry["embargo"] = merged_embargoes[gf.name]
                         files_metadata.append(entry)
                     if generated_files:
                         self.db_manager.insert_datafiles(self.dataset_id, generated_files)
@@ -238,7 +238,7 @@ class DataverseIngester(Bridge):
 
     def __create_generated_files(self, files_metadata) -> [DataFile]:
         generated_files = []
-        self.merged_embargoes = {}
+        merged_embargoes = {} 
         # Remove the existing generated files
         self.db_manager.delete_generated_files(self.dataset_id)
         # Snapshot the form's file list: the loop below reassigns files_metadata
@@ -268,15 +268,15 @@ class DataverseIngester(Bridge):
                     state=DataFileState.GENERATED))
 
                 if tm.merge_uploads and is_pdf:
-                    generated_files.extend(self.__merge_uploads(tm, gf_path, uploads))
+                    generated_files.extend(self.__merge_uploads(tm, gf_path, uploads, merged_embargoes))
 
                 name_to_remove = tm.name
                 files_metadata = [file for file in files_metadata if file.get("name") != name_to_remove]
 
-        return generated_files, files_metadata
+        return generated_files, files_metadata, merged_embargoes
 
 
-    def __merge_uploads(self, tm, base_pdf_path, uploads) -> [DataFile]:
+    def __merge_uploads(self, tm, base_pdf_path, uploads, merged_embargoes) -> [DataFile]:
         """One merged PDF per upload flagged merge=true: generated pages first, then the upload."""
         merged = []
         for fm in uploads:
@@ -310,7 +310,7 @@ class DataverseIngester(Bridge):
             # The merged file contains the upload, so it must be at least as restricted as it
             restricted = bool(tm.restricted) or bool(fm.get("private"))
             if fm.get("embargo"):
-                self.merged_embargoes[name] = fm["embargo"]
+                merged_embargoes[name] = fm["embargo"]
             merged.append(DataFile(
                 dataset_id=self.dataset_id, name=name, path=out_path,
                 size=os.path.getsize(out_path), mime_type="application/pdf",
