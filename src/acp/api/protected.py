@@ -702,7 +702,8 @@ def enqueue_bridge_deposit(
     try:
         queue = get_deposit_queue()
         job = queue.enqueue(
-            "src.acp.jobs.deposit.execute_dataset_deposit",
+            # "src.acp.jobs.deposit.execute_dataset_deposit",
+            "src.acp.rq_deposit.jobs.execute_dataset_deposit",
             app_name=app_name,
             dataset_id=dataset_id,
             request_source=request_source,
